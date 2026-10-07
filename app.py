@@ -51,7 +51,7 @@ def chat_with_lemon(user_message, client_name, assistant_custom_name):
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message}
         ],
-        model="llama-3.1-8b-instant",
+        model="llama-3.3-70b-versatile",
         temperature=0.3,
         max_tokens=60
     )
