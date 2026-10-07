@@ -1,4 +1,6 @@
 gradio
 groq
-gTTS
-duckduckgo_search
+gtts
+fastapi
+uvicorn
+python-multipart
