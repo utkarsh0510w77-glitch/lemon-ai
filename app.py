@@ -11,16 +11,17 @@ client = Groq(api_key=api_key) if api_key else None
 # Active models on Groq
 MODELS_TO_TRY = ["openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
 
-def ask_lemon(user_query, assistant_name="Lemon", user_name="Utkarsh"):
+def ask_lemon(user_query):
     if not user_query or not user_query.strip():
         return "Kripya koi sawal likhiye!", None
 
     if not client:
         return "Error: GROQ_API_KEY environment variable Render par set nahi hai!", None
 
+    # Clean default system prompt bina kisi extra input ke
     system_prompt = (
-        f"You are {assistant_name}, a friendly, precise, and helpful AI assistant talking to {user_name}. "
-        "Keep answers concise, conversational, and direct."
+        "You are Lemon, a friendly, intelligent, and helpful AI assistant. "
+        "Keep your answers concise, conversational, and direct."
     )
 
     response_text = ""
@@ -39,7 +40,6 @@ def ask_lemon(user_query, assistant_name="Lemon", user_name="Utkarsh"):
             response_text = completion.choices[0].message.content
             break
         except Exception as e:
-            # Agar last model bhi fail ho jaye
             if model_id == MODELS_TO_TRY[-1]:
                 response_text = f"Groq Error: {str(e)}"
 
@@ -64,11 +64,7 @@ body { background-color: #0b0f19; font-family: 'Segoe UI', Tahoma, Geneva, Verda
 
 with gr.Blocks(css=custom_css, theme=gr.themes.Soft()) as demo:
     gr.Markdown("# 🍋 LEMON - Personal AI")
-    gr.Markdown("### Welcome Utkarsh! Lemon is ready to assist you.")
-
-    with gr.Accordion("⚙️ Settings (Change Names)", open=False):
-        user_name_input = gr.Textbox(label="Aapka Naam", value="Utkarsh")
-        lemon_name_input = gr.Textbox(label="Assistant Naam", value="Lemon")
+    gr.Markdown("### Lemon is ready to assist you.")
 
     user_msg = gr.Textbox(
         label="Aapka Sawal", 
@@ -82,12 +78,12 @@ with gr.Blocks(css=custom_css, theme=gr.themes.Soft()) as demo:
 
     send_btn.click(
         fn=ask_lemon,
-        inputs=[user_msg, lemon_name_input, user_name_input],
+        inputs=[user_msg],
         outputs=[assistant_reply, assistant_voice]
     )
     user_msg.submit(
         fn=ask_lemon,
-        inputs=[user_msg, lemon_name_input, user_name_input],
+        inputs=[user_msg],
         outputs=[assistant_reply, assistant_voice]
     )
 
