@@ -1,132 +1,96 @@
+import os
 import gradio as gr
 from groq import Groq
 from gtts import gTTS
-import os
-import re
-from datetime import datetime
-from duckduckgo_search import DDGS
+import tempfile
 
-# API key Render environment variables se aayegi
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
-client = Groq(api_key=GROQ_API_KEY)
+# 1. API Client Setup
+api_key = os.environ.get("GROQ_API_KEY", "").strip()
+client = Groq(api_key=api_key) if api_key else None
 
-def get_web_info(query):
-    try:
-        with DDGS() as ddgs:
-            results = list(ddgs.text(query, max_results=1))
-            if results:
-                return results[0]['body'][:250]
-    except Exception:
-        return ""
-    return ""
+# Active models on Groq
+MODELS_TO_TRY = ["openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
 
-def chat_with_lemon(user_message, client_name, assistant_custom_name):
-    if not user_message.strip():
-        return "", None
+def ask_lemon(user_query, assistant_name="Lemon", user_name="Utkarsh"):
+    if not user_query or not user_query.strip():
+        return "Kripya koi sawal likhiye!", None
 
-    user_name = client_name.strip() if client_name.strip() else "Sir/Ma'am"
-    bot_name = assistant_custom_name.strip() if assistant_custom_name.strip() else "Lemon"
-
-    now = datetime.now()
-    current_time_str = now.strftime("%A, %d %B %Y, %I:%M %p")
-
-    search_keywords = ["today", "aaj", "current", "news", "weather", "score", "latest", "date", "tarikh"]
-    extra_context = ""
-    if any(k in user_message.lower() for k in search_keywords):
-        data = get_web_info(user_message)
-        if data:
-            extra_context = f"\nLive Internet Data: {data}"
+    if not client:
+        return "Error: GROQ_API_KEY environment variable Render par set nahi hai!", None
 
     system_prompt = (
-        f"Your name is {bot_name}, created by Utkarsh Bandhu. "
-        f"You are dedicated, deeply loyal, and helpful to your client, {user_name}. "
-        f"Address the client politely as {user_name}. "
-        f"If asked who made you, proudly say you were created by Utkarsh Bandhu. "
-        f"Today's date and time is: {current_time_str}. {extra_context}\n"
-        f"Give factual, direct answers in 1 to 2 sharp sentences only. No roleplay or filler words."
+        f"You are {assistant_name}, a friendly, precise, and helpful AI assistant talking to {user_name}. "
+        "Keep answers concise, conversational, and direct."
     )
 
-    chat_completion = client.chat.completions.create(
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message}
-        ],
-        model="openai/gpt-oss-20b",
-        temperature=0.3,
-        max_tokens=60
-    )
+    response_text = ""
+    # Try active models
+    for model_id in MODELS_TO_TRY:
+        try:
+            completion = client.chat.completions.create(
+                model=model_id,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_query}
+                ],
+                temperature=0.7,
+                max_tokens=500
+            )
+            response_text = completion.choices[0].message.content
+            break
+        except Exception as e:
+            # Agar last model bhi fail ho jaye
+            if model_id == MODELS_TO_TRY[-1]:
+                response_text = f"Groq Error: {str(e)}"
 
-    response = chat_completion.choices[0].message.content.strip()
-
-    for delimiter in ["\nYou:", "You:", "\nUser:", "User:", f"\n{bot_name}:", "<|user|>", "\n\n"]:
-        if delimiter in response:
-            response = response.split(delimiter)[0].strip()
-
-    response = re.sub(r'\(.*?\)', '', response)
-    response = re.sub(rf'(?i)^{bot_name}:\s*', '', response).strip()
-
-    sentences = re.split(r'(?<=[.!?]) +', response)
-    if len(sentences) > 2:
-        response = " ".join(sentences[:2])
-
-    if not response:
-        response = f"Ji {user_name}, main aapki seva me hazir hoon."
-
-    audio_path = "lemon_reply.mp3"
+    # Audio generation using gTTS
+    audio_path = None
     try:
-        tts = gTTS(text=response, lang='hi')
-        tts.save(audio_path)
+        if response_text and not response_text.startswith("Groq Error"):
+            tts = gTTS(text=response_text, lang='en', slow=False)
+            temp_audio = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+            tts.save(temp_audio.name)
+            audio_path = temp_audio.name
     except Exception:
-        tts = gTTS(text=response, lang='en', tld='co.in')
-        tts.save(audio_path)
+        audio_path = None
 
-    return response, audio_path
+    return response_text, audio_path
 
-def start_app(c_name, a_name):
-    final_user = c_name.strip() if c_name.strip() else "Client"
-    final_bot = a_name.strip() if a_name.strip() else "Lemon"
-    welcome_text = f"### Welcome {final_user}! {final_bot} is ready to assist you.\n*Created with precision by Utkarsh Bandhu*"
-    return (
-        gr.update(visible=False),
-        gr.update(visible=True),
-        welcome_text,
-        final_user,
-        final_bot
-    )
+# Custom UI
+custom_css = """
+body { background-color: #0b0f19; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+.gradio-container { max-width: 650px !important; margin: auto !important; }
+"""
 
-with gr.Blocks(theme=gr.themes.Soft()) as demo:
+with gr.Blocks(css=custom_css, theme=gr.themes.Soft()) as demo:
     gr.Markdown("# 🍋 LEMON - Personal AI")
-    
-    with gr.Column(visible=True) as onboarding_box:
-        gr.Markdown("### 👋 Welcome! Let's get to know each other.")
-        c_input = gr.Textbox(label="Aapka Naam (Your Name)", placeholder="Enter your name...", value="Utkarsh")
-        a_input = gr.Textbox(label="Assistant ka Naam", placeholder="What would you like to call me?", value="Lemon")
-        start_btn = gr.Button("Save & Start Talking 🚀", variant="primary")
+    gr.Markdown("### Welcome Utkarsh! Lemon is ready to assist you.")
 
-    with gr.Column(visible=False) as chat_box:
-        header_text = gr.Markdown("")
-        with gr.Accordion("⚙️ Settings (Change Names)", open=False):
-            sett_c_name = gr.Textbox(label="Client Name", value="Utkarsh")
-            sett_a_name = gr.Textbox(label="Assistant Name", value="Lemon")
-        
-        user_input = gr.Textbox(lines=1, placeholder="Apne assistant se sawal poochein...", label="Aapka Sawal")
-        send_btn = gr.Button("Send", variant="primary")
-        
-        with gr.Row():
-            lemon_output = gr.Textbox(label="Assistant Response")
-            lemon_audio = gr.Audio(label="Voice Reply", autoplay=True)
+    with gr.Accordion("⚙️ Settings (Change Names)", open=False):
+        user_name_input = gr.Textbox(label="Aapka Naam", value="Utkarsh")
+        lemon_name_input = gr.Textbox(label="Assistant Naam", value="Lemon")
 
-    start_btn.click(
-        start_app,
-        inputs=[c_input, a_input],
-        outputs=[onboarding_box, chat_box, header_text, sett_c_name, sett_a_name]
+    user_msg = gr.Textbox(
+        label="Aapka Sawal", 
+        placeholder="Type your message here...", 
+        lines=2
     )
+    send_btn = gr.Button("Send", variant="primary")
+
+    assistant_reply = gr.Textbox(label="Assistant Response", interactive=False)
+    assistant_voice = gr.Audio(label="Lemon Voice", autoplay=True)
 
     send_btn.click(
-        chat_with_lemon,
-        inputs=[user_input, sett_c_name, sett_a_name],
-        outputs=[lemon_output, lemon_audio]
+        fn=ask_lemon,
+        inputs=[user_msg, lemon_name_input, user_name_input],
+        outputs=[assistant_reply, assistant_voice]
+    )
+    user_msg.submit(
+        fn=ask_lemon,
+        inputs=[user_msg, lemon_name_input, user_name_input],
+        outputs=[assistant_reply, assistant_voice]
     )
 
-port = int(os.environ.get("PORT", 7860))
-demo.launch(server_name="0.0.0.0", server_port=port)
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 7860))
+    demo.launch(server_name="0.0.0.0", server_port=port)
