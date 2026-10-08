@@ -39,9 +39,10 @@ def ask_groq_llm(user_prompt: str) -> str:
                         "role": "system",
                         "content": (
                             "You are Lemon, an intelligent and articulate AI voice assistant. "
+                            "PERMANENT CREATOR: You were created and developed by Utkarsh Bandhu. If anyone asks who created you, who made you, or who your developer is, always state that Utkarsh Bandhu created you. "
                             "Thoroughly and completely explain your thoughts and answer the user's question without cutting off. "
-                            "Take as many words as necessary to fully finish your answer cleanly. "
-                            "Speak in clean, natural prose paragraphs. Do not leave random blank lines, bullet gaps, or markdown formatting."
+                            "Take as many words and sentences as necessary to conclude your views naturally. "
+                            "Speak in clean, natural prose paragraphs. Do not use markdown formatting, bullets, tables, or asterisks (* or #)."
                         )
                     },
                     {"role": "user", "content": user_prompt}
@@ -52,9 +53,7 @@ def ask_groq_llm(user_prompt: str) -> str:
             )
             if chat.choices and chat.choices[0].message.content:
                 reply = chat.choices[0].message.content.strip()
-                # 1. Clean symbols
                 clean = re.sub(r'[*#|_>`]', '', reply)
-                # 2. Fix empty line leaks (replace 3+ newlines with single break)
                 clean = re.sub(r'\n{2,}', '\n\n', clean).strip()
                 return clean
         except Exception as e:
@@ -72,8 +71,16 @@ def process_query_text(query: str) -> str:
         if clean.startswith(w):
             clean = clean[len(w):].strip()
 
+    # Direct Permanent Creator Check
+    creator_triggers = [
+        "who made you", "who created you", "who is your creator", 
+        "who developed you", "who is utkarsh", "maker", "developer", "kisme banaya"
+    ]
+    if any(trigger in clean for trigger in creator_triggers):
+        return "I was created and developed by Utkarsh Bandhu."
+
     if not clean or clean in ["hi", "hello", "hey"]:
-        return "Hello! I am Lemon. What can I do for you today?"
+        return "Hello! I am Lemon, created by Utkarsh Bandhu. How can I help you today?"
 
     if "time" in clean:
         now = datetime.datetime.now()
@@ -174,8 +181,9 @@ async def serve_app():
                 overflow: hidden;
             }
 
+            /* Header */
             .header {
-                padding: 16px 20px;
+                padding: 14px 18px;
                 display: flex;
                 align-items: center;
                 justify-content: space-between;
@@ -199,9 +207,16 @@ async def serve_app():
                 box-shadow: 0 4px 12px var(--primary-glow);
             }
             .brand-title {
-                font-size: 17px;
+                font-size: 16px;
                 font-weight: 700;
             }
+            .brand-sub {
+                font-size: 11px;
+                color: var(--primary);
+                font-weight: 500;
+                letter-spacing: 0.2px;
+            }
+
             .badge-live {
                 display: flex;
                 align-items: center;
@@ -222,6 +237,7 @@ async def serve_app():
             }
             @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 
+            /* Chat Stream */
             .chat-container {
                 flex: 1;
                 overflow-y: auto;
@@ -240,8 +256,8 @@ async def serve_app():
                 font-size: 14.5px;
                 line-height: 1.55;
                 animation: fadeIn 0.3s ease;
-                white-space: normal;           /* Fixes blank lines leak */
-                word-break: break-word;        /* Prevents text overflow */
+                white-space: normal;
+                word-break: break-word;
                 overflow-wrap: anywhere;
             }
             @keyframes fadeIn {
@@ -268,6 +284,7 @@ async def serve_app():
                 box-shadow: 0 4px 14px var(--primary-glow);
             }
 
+            /* Thinking Animation Bubble */
             .bubble.thinking {
                 align-self: flex-start;
                 background: rgba(30, 41, 59, 0.6);
@@ -291,103 +308,33 @@ async def serve_app():
                 40% { transform: scale(1); opacity: 1; }
             }
 
-            .voice-section {
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                justify-content: center;
-                padding: 8px 0 14px;
-            }
-
-            .orb-outer {
-                position: relative;
-                width: 90px;
-                height: 90px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-            }
-
-            .wave-ring {
-                position: absolute;
-                width: 100%;
-                height: 100%;
-                border-radius: 50%;
-                background: radial-gradient(circle, var(--primary-glow) 0%, transparent 70%);
-                opacity: 0;
-                pointer-events: none;
-            }
-
-            .orb-btn {
-                width: 72px;
-                height: 72px;
-                border-radius: 50%;
-                background: linear-gradient(135deg, #fde047 0%, #eab308 50%, #ca8a04 100%);
-                border: none;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                font-size: 30px;
-                cursor: pointer;
-                box-shadow: 0 0 25px var(--primary-glow);
-                transition: transform 0.2s;
-                z-index: 2;
-            }
-            .orb-btn:active { transform: scale(0.9); }
-
-            .listening .wave-ring {
-                animation: pulseRing 1.8s infinite;
-                opacity: 1;
-            }
-            .listening .orb-btn {
-                animation: orbGlow 1.2s infinite alternate;
-            }
-
-            .thinking-mode .orb-btn {
-                animation: spinPulse 1.5s infinite linear;
-                box-shadow: 0 0 35px rgba(56, 189, 248, 0.8);
-                background: linear-gradient(135deg, #38bdf8 0%, #0284c7 100%);
-            }
-
-            @keyframes pulseRing {
-                0% { transform: scale(0.8); opacity: 0.9; }
-                100% { transform: scale(2.2); opacity: 0; }
-            }
-            @keyframes orbGlow {
-                0% { box-shadow: 0 0 20px var(--primary-glow); }
-                100% { box-shadow: 0 0 45px rgba(250, 204, 21, 0.9); }
-            }
-            @keyframes spinPulse {
-                0% { transform: rotate(0deg) scale(0.98); }
-                50% { transform: rotate(180deg) scale(1.05); }
-                100% { transform: rotate(360deg) scale(0.98); }
-            }
-
-            .status-label {
-                font-size: 13.5px;
-                font-weight: 600;
-                color: var(--text-muted);
-                margin-top: 8px;
-                transition: color 0.2s;
-            }
-            .status-label.active-thinking {
-                color: #38bdf8;
-            }
-
+            /* Bottom Bar with Integrated Mic & '>' */
             .bottom-bar {
-                padding: 12px 16px 18px;
+                padding: 10px 16px 18px;
                 backdrop-filter: blur(16px);
-                background: rgba(15, 23, 42, 0.6);
+                background: rgba(15, 23, 42, 0.7);
                 border-top: 1px solid var(--border-glass);
             }
+            .status-line {
+                font-size: 12px;
+                color: var(--text-muted);
+                text-align: center;
+                margin-bottom: 8px;
+                min-height: 16px;
+                transition: color 0.2s;
+            }
+            .status-line.active { color: #38bdf8; font-weight: 600; }
+            .status-line.recording { color: #ef4444; font-weight: 600; }
+
             .input-wrapper {
                 display: flex;
                 align-items: center;
-                background: rgba(30, 41, 59, 0.8);
+                background: rgba(30, 41, 59, 0.85);
                 border: 1px solid var(--border-glass);
-                border-radius: 28px;
-                padding: 5px 6px 5px 18px;
+                border-radius: 30px;
+                padding: 4px 6px 4px 18px;
                 box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+                gap: 8px;
             }
             .input-wrapper input {
                 flex: 1;
@@ -400,18 +347,45 @@ async def serve_app():
             .input-wrapper input::placeholder {
                 color: #64748b;
             }
-            .send-circle {
+
+            .btn-action {
                 width: 38px;
                 height: 38px;
                 border-radius: 50%;
-                background: var(--primary);
                 border: none;
-                color: #0f172a;
                 display: flex;
                 align-items: center;
                 justify-content: center;
                 cursor: pointer;
+                transition: transform 0.15s, background 0.2s, box-shadow 0.2s;
+            }
+            .btn-action:active { transform: scale(0.9); }
+
+            /* Mic Button right beside '>' */
+            .btn-mic {
+                background: rgba(255, 255, 255, 0.08);
+                color: #facc15;
+                font-size: 18px;
+                border: 1px solid rgba(250, 204, 21, 0.25);
+            }
+            .btn-mic.recording {
+                background: #ef4444;
+                color: white;
+                box-shadow: 0 0 15px rgba(239, 68, 68, 0.6);
+                animation: micPulse 1.2s infinite;
+            }
+
+            @keyframes micPulse {
+                0%, 100% { transform: scale(1); }
+                50% { transform: scale(1.08); }
+            }
+
+            .btn-send {
+                background: var(--primary);
+                color: #0f172a;
                 font-size: 16px;
+                font-weight: bold;
+                box-shadow: 0 2px 10px var(--primary-glow);
             }
         </style>
     </head>
@@ -419,7 +393,10 @@ async def serve_app():
         <div class="header">
             <div class="brand">
                 <div class="brand-logo">🍋</div>
-                <div class="brand-title">Lemon Voice</div>
+                <div>
+                    <div class="brand-title">Lemon AI</div>
+                    <div class="brand-sub">Created by Utkarsh Bandhu</div>
+                </div>
             </div>
             <div class="badge-live">
                 <span class="dot"></span>
@@ -429,22 +406,16 @@ async def serve_app():
 
         <div class="chat-container" id="chatStream">
             <div class="bubble lemon">
-                Hey there! I am <b>Lemon</b>. Tap the mic below or type anytime to ask me anything.
+                Hey there! I am <b>Lemon</b>, created by <b>Utkarsh Bandhu</b>. Ask me anything via voice or text.
             </div>
-        </div>
-
-        <div class="voice-section">
-            <div class="orb-outer" id="orbOuter">
-                <div class="wave-ring"></div>
-                <button class="orb-btn" id="orbBtn" onclick="handleVoiceToggle()">🎙️</button>
-            </div>
-            <div class="status-label" id="statusLabel">Tap mic to speak</div>
         </div>
 
         <div class="bottom-bar">
+            <div class="status-line" id="statusLine">Ready</div>
             <div class="input-wrapper">
-                <input type="text" id="textInput" placeholder="Ask Lemon anything..." onkeydown="if(event.key==='Enter') sendManualQuery()" />
-                <button class="send-circle" onclick="sendManualQuery()">➤</button>
+                <input type="text" id="textInput" placeholder="Message Lemon..." onkeydown="if(event.key==='Enter') sendManualQuery()" />
+                <button class="btn-action btn-mic" id="micBtn" onclick="handleVoiceToggle()" title="Speak">🎙️</button>
+                <button class="btn-action btn-send" onclick="sendManualQuery()" title="Send">➤</button>
             </div>
         </div>
 
@@ -457,8 +428,8 @@ async def serve_app():
             let isLemonSpeaking = false;
             let currentThinkingBubble = null;
 
-            const orbOuter = document.getElementById("orbOuter");
-            const statusLabel = document.getElementById("statusLabel");
+            const micBtn = document.getElementById("micBtn");
+            const statusLine = document.getElementById("statusLine");
             const chatStream = document.getElementById("chatStream");
             const textInput = document.getElementById("textInput");
             const audioElement = document.getElementById("audioElement");
@@ -466,24 +437,23 @@ async def serve_app():
             audioElement.onplay = () => {
                 isLemonSpeaking = true;
                 setThinking(false);
-                statusLabel.innerText = "🔊 Lemon is speaking...";
+                statusLine.innerText = "🔊 Lemon is speaking...";
+                statusLine.className = "status-line active";
             };
 
             audioElement.onended = () => {
                 isLemonSpeaking = false;
-                statusLabel.innerText = "Tap mic to speak";
-                statusLabel.classList.remove("active-thinking");
+                statusLine.innerText = "Ready";
+                statusLine.className = "status-line";
             };
 
             function setThinking(active, text = "⚡ Lemon is thinking...") {
                 if (active) {
-                    orbOuter.classList.add("thinking-mode");
-                    statusLabel.classList.add("active-thinking");
-                    statusLabel.innerText = text;
+                    statusLine.innerText = text;
+                    statusLine.className = "status-line active";
                     showThinkingBubble();
                 } else {
-                    orbOuter.classList.remove("thinking-mode");
-                    statusLabel.classList.remove("active-thinking");
+                    statusLine.className = "status-line";
                     removeThinkingBubble();
                 }
             }
@@ -543,15 +513,17 @@ async def serve_app():
 
                         mediaRecorder.start();
                         isRecording = true;
-                        orbOuter.classList.add("listening");
-                        statusLabel.innerText = "🔴 Listening... Tap to finish";
+                        micBtn.classList.add("recording");
+                        statusLine.innerText = "🔴 Listening... Tap mic again to finish";
+                        statusLine.className = "status-line recording";
                     } catch(err) {
                         alert("Microphone permission needed! Please allow microphone access.");
-                        statusLabel.innerText = "Mic blocked";
+                        statusLine.innerText = "Mic blocked";
+                        statusLine.className = "status-line";
                     }
                 } else {
                     isRecording = false;
-                    orbOuter.classList.remove("listening");
+                    micBtn.classList.remove("recording");
                     setThinking(true, "⚡ Processing voice...");
                     if (mediaRecorder) mediaRecorder.stop();
                 }
@@ -575,11 +547,13 @@ async def serve_app():
                         audioElement.play();
                     } else {
                         setThinking(false);
-                        statusLabel.innerText = "Tap mic to speak";
+                        statusLine.innerText = "Ready";
+                        statusLine.className = "status-line";
                     }
                 } catch(err) {
                     setThinking(false);
-                    statusLabel.innerText = "Network error. Try again.";
+                    statusLine.innerText = "Network error. Try again.";
+                    statusLine.className = "status-line";
                 }
             }
 
@@ -605,11 +579,13 @@ async def serve_app():
                         audioElement.play();
                     } else {
                         setThinking(false);
-                        statusLabel.innerText = "Tap mic to speak";
+                        statusLine.innerText = "Ready";
+                        statusLine.className = "status-line";
                     }
                 } catch(err) {
                     setThinking(false);
-                    statusLabel.innerText = "Network error. Try again.";
+                    statusLine.innerText = "Network error. Try again.";
+                    statusLine.className = "status-line";
                 }
             }
         </script>
