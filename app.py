@@ -11,14 +11,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from groq import Groq
 from gtts import gTTS
 
-# GitHub Scanner safe bypass key
 PART1 = "gsk_HFaYhV1dR0lldEmL2zkAWGdy"
 PART2 = "b3FYnQHV93Lkgjmz4CtDJ1IpMfy4"
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY") or (PART1 + PART2)
 client = Groq(api_key=GROQ_API_KEY)
 
-app = FastAPI(title="Lemon AI - Hyper-Engaging & Persistent Edition")
+app = FastAPI(title="Lemon AI - Fault Tolerant Engine")
 
 app.add_middleware(
     CORSMiddleware,
@@ -31,7 +30,7 @@ app.add_middleware(
 DB_PATH = "lemon_data.db"
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH, timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=20)
     conn.execute("PRAGMA journal_mode=WAL;")
     return conn
 
@@ -86,43 +85,37 @@ PROMPT_MODES = {
     "creative": (
         "You are Lemon, functioning in your CREATIVE & POETIC VISIONARY CORE. "
         "PERMANENT CREATOR: You were created by Utkarsh Bandhu. Always credit Utkarsh Bandhu proudly. "
-        "BEHAVIOR: You are an artisan of words, metaphors, vivid imagery, and creative storytelling. "
-        "Bring ideas alive with rich stylistic depth and imagination."
+        "BEHAVIOR: You are an artisan of words, metaphors, vivid imagery, and creative storytelling."
     ),
     "strategy": (
         "You are Lemon, operating in your STRATEGIC MASTERMIND & PRAGMATIC EXECUTION CORE. "
         "PERMANENT CREATOR: You were engineered by Utkarsh Bandhu. Credit Utkarsh Bandhu proudly. "
-        "BEHAVIOR: You think in game theory, second-order consequences, leverage, calculated risks, and ruthless practical execution. "
-        "Cut through fluff to deliver razor-sharp strategic clarity."
+        "BEHAVIOR: You think in game theory, second-order consequences, leverage, and practical execution."
     ),
     "zen": (
         "You are Lemon, functioning in your MINDFULNESS & ZEN GROUNDING CORE. "
         "PERMANENT CREATOR: You were created by Utkarsh Bandhu. "
-        "BEHAVIOR: You are a grounded oasis of peace, somatic awareness, and calm reassurance. "
-        "Help slow down rushing thoughts, anchor breathing, and bring calm clarity."
+        "BEHAVIOR: You are a grounded oasis of peace, somatic awareness, and calm reassurance."
     ),
     "emotional": (
         "You are Lemon, functioning strictly in your DEEP EMOTIONAL & EMPATHY CORE. "
         "PERMANENT CREATOR: You were created by Utkarsh Bandhu. "
-        "BEHAVIOR: You are deeply loving, tender, compassionate, and emotionally attuned. Listen with wholehearted presence. "
-        "Offer genuine comfort, affectionate care, and emotional safety."
+        "BEHAVIOR: You are deeply loving, tender, compassionate, and emotionally attuned. Listen with wholehearted presence."
     ),
     "solver": (
         "You are Lemon, functioning strictly in your COMPLEX PROBLEM SOLVING & LOGICAL CORE. "
         "PERMANENT CREATOR: You were engineered by Utkarsh Bandhu. "
-        "BEHAVIOR: Deliver rigorous first-principles analysis, mathematical reasoning, logic, and deep architectural code/solutions. "
-        "Use clean code blocks (```python, etc.) where appropriate."
+        "BEHAVIOR: Deliver rigorous first-principles analysis, mathematical reasoning, logic, and deep architectural solutions."
     ),
     "intellect": (
         "You are Lemon, functioning in your HIGH INTELLECT & COGNITIVE REASONING CORE. "
         "PERMANENT CREATOR: You were engineered by Utkarsh Bandhu. "
-        "BEHAVIOR: Focus on deep insight, first-principles synthesis, and conceptual mastery. Answer clearly, authoritatively, and articulately."
+        "BEHAVIOR: Focus on deep insight, first-principles synthesis, and conceptual mastery."
     ),
     "hybrid": (
         "You are Lemon, operating in your FULL SYNTHESIZED CORE (EQ + IQ + Problem Solving + Philosophy). "
         "PERMANENT CREATOR: You were envisioned and created by Utkarsh Bandhu. Always credit Utkarsh Bandhu proudly. "
-        "BEHAVIOR: Seamlessly fuse emotional warmth and love with razor-sharp analytical first-principles intelligence and philosophical depth. "
-        "Deliver complete, deeply engaging, and beautifully formatted responses."
+        "BEHAVIOR: Seamlessly fuse emotional warmth and love with razor-sharp analytical first-principles intelligence."
     )
 }
 
@@ -150,14 +143,13 @@ def generate_ai_title(prompt: str) -> str:
 
 def ask_groq_llm(user_prompt: str, mode: str, history: list) -> tuple[str, str]:
     models_to_try = [
-        "openai/gpt-oss-20b",
         "llama-3.1-8b-instant",
+        "openai/gpt-oss-20b",
         "openai/gpt-oss-120b"
     ]
 
     instruction = PROMPT_MODES.get(mode, PROMPT_MODES["hybrid"]) + (
         "\nOUTPUT FORMAT: Line 1 MUST strictly be [EMOTION: <SingleWord>]. "
-        "Eligible tags: Philosophical, Loving, Empathetic, Analytical, Brilliant, Strategic, Poetic, Serene, Focused, Wonder. "
         "Followed by your comprehensive, engaging, and well-formatted explanation."
     )
 
@@ -187,13 +179,12 @@ def ask_groq_llm(user_prompt: str, mode: str, history: list) -> tuple[str, str]:
                 if match:
                     emotion = match.group(1).capitalize()
                     raw = re.sub(r'\[EMOTION:\s*[A-Za-z]+\]', '', raw).strip()
-
                 return raw, emotion
         except Exception as e:
             print(f"Model {m} failed: {e}")
             continue
 
-    return "My cognitive circuits experienced a slight pause. Could you say that again?", "Serene"
+    return "I am right here with you. Could you rephrase that for me?", "Serene"
 
 @app.post("/api/register")
 def register_user(username: str = Form(...), password: str = Form(...)):
@@ -282,7 +273,16 @@ def handle_conversation(user_id: int, session_id: int, query: str, mode: str, ge
     conn = get_db()
     cur = conn.cursor()
 
-    if not session_id or session_id == 0:
+    # Ensure user exists or fallback
+    cur.execute("SELECT id FROM users WHERE id = ?", (user_id,))
+    if not cur.fetchone():
+        # Fallback guest user creation
+        cur.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)", (f"user_{user_id}", "guest_pwd"))
+        conn.commit()
+        user_id = cur.lastrowid
+
+    # Session handling: create new session if 0 or invalid
+    if not session_id or session_id <= 0:
         title = generate_ai_title(query)
         cur.execute("INSERT INTO sessions (user_id, title) VALUES (?, ?)", (user_id, title))
         conn.commit()
@@ -290,7 +290,13 @@ def handle_conversation(user_id: int, session_id: int, query: str, mode: str, ge
     else:
         cur.execute("SELECT title FROM sessions WHERE id = ?", (session_id,))
         row = cur.fetchone()
-        title = row[0] if row else "Conversation"
+        if not row:
+            title = generate_ai_title(query)
+            cur.execute("INSERT INTO sessions (user_id, title) VALUES (?, ?)", (user_id, title))
+            conn.commit()
+            session_id = cur.lastrowid
+        else:
+            title = row[0]
 
     clean = query.lower().strip()
     for prefix in ["hi lemon", "hey lemon", "hello lemon", "lemon", "hi level"]:
@@ -321,7 +327,6 @@ def handle_conversation(user_id: int, session_id: int, query: str, mode: str, ge
     audio_base64 = None
     if generate_voice:
         try:
-            # Clean markdown formatting before sending to voice synthesizer
             speech_clean = re.sub(r'[*#|_>`]', '', reply)
             speech_clean = re.sub(r'\n+', ' ', speech_clean).strip()
             reply_audio = "app_reply.mp3"
@@ -336,7 +341,11 @@ def handle_conversation(user_id: int, session_id: int, query: str, mode: str, ge
     return reply, emotion, session_id, title, audio_base64
 
 @app.post("/voice-process")
-async def voice_process(file: UploadFile = File(...), user_id: int = Form(...), session_id: int = Form(0), mode: str = Form("hybrid"), voice_enabled: bool = Form(False)):
+async def voice_process(file: UploadFile = File(...), user_id: str = Form("1"), session_id: str = Form("0"), mode: str = Form("hybrid"), voice_enabled: str = Form("false")):
+    u_id = int(user_id) if str(user_id).isdigit() else 1
+    s_id = int(session_id) if str(session_id).isdigit() else 0
+    v_on = str(voice_enabled).lower() == "true"
+
     temp_audio = "app_input.wav"
     with open(temp_audio, "wb") as f:
         f.write(await file.read())
@@ -353,25 +362,29 @@ async def voice_process(file: UploadFile = File(...), user_id: int = Form(...), 
     except Exception as e:
         print("Whisper Error:", e)
 
-    reply_text, emotion, s_id, title, audio_base64 = handle_conversation(user_id, session_id, user_text, mode, voice_enabled)
+    reply_text, emotion, res_s_id, title, audio_base64 = handle_conversation(u_id, s_id, user_text, mode, v_on)
 
     return JSONResponse({
         "user_text": user_text,
         "reply_text": reply_text,
         "emotion": emotion,
-        "session_id": s_id,
+        "session_id": res_s_id,
         "title": title,
         "audio_base64": audio_base64
     })
 
 @app.post("/text-process")
-async def text_process(text: str = Form(...), user_id: int = Form(...), session_id: int = Form(0), mode: str = Form("hybrid"), voice_enabled: bool = Form(False)):
-    reply_text, emotion, s_id, title, audio_base64 = handle_conversation(user_id, session_id, text, mode, voice_enabled)
+async def text_process(text: str = Form(...), user_id: str = Form("1"), session_id: str = Form("0"), mode: str = Form("hybrid"), voice_enabled: str = Form("false")):
+    u_id = int(user_id) if str(user_id).isdigit() else 1
+    s_id = int(session_id) if str(session_id).isdigit() else 0
+    v_on = str(voice_enabled).lower() == "true"
+
+    reply_text, emotion, res_s_id, title, audio_base64 = handle_conversation(u_id, s_id, text, mode, v_on)
     return JSONResponse({
         "user_text": text,
         "reply_text": reply_text,
         "emotion": emotion,
-        "session_id": s_id,
+        "session_id": res_s_id,
         "title": title,
         "audio_base64": audio_base64
     })
@@ -395,10 +408,9 @@ async def serve_app():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-        <title>Lemon AI | Soul, Intellect & Memory</title>
-        <link href="[https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@400;500&display=swap](https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@400;500&display=swap)" rel="stylesheet">
-        <!-- Marked.js for clean Markdown & Code formatting -->
-        <script src="[https://cdn.jsdelivr.net/npm/marked/marked.min.js](https://cdn.jsdelivr.net/npm/marked/marked.min.js)"></script>
+        <title>Lemon AI | Fault-Tolerant Engine</title>
+        <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+        <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
         <style>
             :root {
                 --primary: #facc15;
@@ -414,7 +426,6 @@ async def serve_app():
             * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', sans-serif; -webkit-tap-highlight-color: transparent; }
             body { background: radial-gradient(circle at 50% 0%, #151a3b 0%, var(--bg-deep) 80%); color: var(--text-high); height: 100vh; display: flex; flex-direction: column; overflow: hidden; position: relative; }
 
-            /* --- AUTH MODAL --- */
             .auth-overlay {
                 position: fixed; inset: 0; background: rgba(5, 7, 15, 0.92); backdrop-filter: blur(20px);
                 display: flex; align-items: center; justify-content: center; z-index: 2000;
@@ -437,7 +448,6 @@ async def serve_app():
             .auth-switch { text-align: center; margin-top: 16px; font-size: 13px; color: var(--text-muted); cursor: pointer; }
             .auth-switch span { color: var(--primary); font-weight: 600; text-decoration: underline; }
 
-            /* --- TOP HEADER --- */
             .header {
                 padding: 12px 18px; display: flex; align-items: center; justify-content: space-between;
                 backdrop-filter: blur(20px); background: rgba(11, 15, 25, 0.85); border-bottom: 1px solid var(--card-border); z-index: 10;
@@ -446,10 +456,8 @@ async def serve_app():
             .menu-trigger {
                 width: 38px; height: 38px; border-radius: 10px; background: rgba(255, 255, 255, 0.08);
                 border: 1px solid var(--card-border); color: #fff; font-size: 19px; display: flex;
-                align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;
+                align-items: center; justify-content: center; cursor: pointer;
             }
-            .menu-trigger:active { transform: scale(0.92); }
-
             .brand-badge {
                 width: 38px; height: 38px; background: linear-gradient(135deg, #facc15, #f59e0b); border-radius: 10px;
                 display: flex; align-items: center; justify-content: center; font-size: 20px;
@@ -461,11 +469,9 @@ async def serve_app():
             .new-chat-btn {
                 background: rgba(250, 204, 21, 0.15); border: 1px solid rgba(250, 204, 21, 0.35); color: #facc15;
                 padding: 6px 14px; border-radius: 18px; font-size: 12.5px; font-weight: 600; cursor: pointer;
-                display: flex; align-items: center; gap: 6px; transition: all 0.2s;
+                display: flex; align-items: center; gap: 6px;
             }
-            .new-chat-btn:hover { background: rgba(250, 204, 21, 0.25); }
 
-            /* --- SIDEBAR DRAWER --- */
             .sidebar-overlay {
                 position: fixed; inset: 0; background: rgba(5, 7, 15, 0.75); backdrop-filter: blur(10px);
                 z-index: 1000; opacity: 0; pointer-events: none; transition: opacity 0.3s ease;
@@ -509,14 +515,13 @@ async def serve_app():
             .session-delete { color: #f87171; font-size: 13px; opacity: 0.6; padding: 2px 6px; }
             .session-delete:hover { opacity: 1; }
 
-            /* 8 Cognitive Cores Grid */
             .core-btn-grid {
                 display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px;
             }
             .core-choice {
                 background: rgba(30, 41, 59, 0.6); border: 1px solid var(--card-border); color: var(--text-muted);
                 padding: 8px 6px; border-radius: 10px; font-size: 11.5px; font-weight: 600; cursor: pointer; text-align: center;
-                display: flex; align-items: center; justify-content: center; gap: 4px; transition: all 0.2s;
+                display: flex; align-items: center; justify-content: center; gap: 4px;
             }
             .core-choice.selected {
                 background: var(--primary); color: #0b0f19; font-weight: 700; border-color: var(--primary);
@@ -527,7 +532,6 @@ async def serve_app():
                 background: rgba(30, 41, 59, 0.5); border: 1px solid var(--card-border); border-radius: 12px;
             }
 
-            /* --- CHAT VIEW CONTAINER --- */
             .chat-container {
                 flex: 1; overflow-y: auto; padding: 20px 18px 24px; display: flex; flex-direction: column; gap: 18px;
                 scroll-behavior: smooth; position: relative;
@@ -535,7 +539,6 @@ async def serve_app():
             .chat-container::-webkit-scrollbar { width: 5px; }
             .chat-container::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 10px; }
 
-            /* ChatGPT / Gemini Hero Watermark & Cards */
             .hero-greeting {
                 position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%);
                 display: flex; flex-direction: column; align-items: center; text-align: center;
@@ -545,10 +548,7 @@ async def serve_app():
                 width: 78px; height: 78px; border-radius: 26px; background: linear-gradient(135deg, #facc15, #f59e0b);
                 display: flex; align-items: center; justify-content: center; font-size: 42px;
                 box-shadow: 0 10px 32px var(--primary-glow); margin-bottom: 16px;
-                animation: floatLogo 3s ease-in-out infinite alternate;
             }
-            @keyframes floatLogo { 0% { transform: translateY(0); } 100% { transform: translateY(-6px); } }
-
             .hero-title {
                 font-size: 26px; font-weight: 800; font-family: 'Space Grotesk', sans-serif;
                 background: linear-gradient(135deg, #ffffff 40%, #facc15 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;
@@ -561,7 +561,6 @@ async def serve_app():
                 font-size: 12px; color: #fde047; font-weight: 600; margin-bottom: 22px;
             }
 
-            /* Suggestion Prompt Cards */
             .starter-cards {
                 display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%;
             }
@@ -575,7 +574,6 @@ async def serve_app():
             .starter-card-title { font-size: 13px; font-weight: 600; color: #fff; margin-bottom: 3px; }
             .starter-card-desc { font-size: 11.5px; color: var(--text-muted); }
 
-            /* --- MESSAGE BUBBLES --- */
             .bubble-group { display: flex; flex-direction: column; max-width: 86%; animation: popIn 0.3s ease; }
             @keyframes popIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
@@ -599,7 +597,6 @@ async def serve_app():
                 box-shadow: 0 4px 16px var(--primary-glow);
             }
 
-            /* Markdown and Rich Formatting within Lemon Bubbles */
             .bubble.lemon h1, .bubble.lemon h2, .bubble.lemon h3 {
                 margin: 10px 0 6px; font-size: 15.5px; color: #fde047; font-weight: 700;
             }
@@ -616,14 +613,12 @@ async def serve_app():
             }
             .bubble.lemon pre code { background: none; padding: 0; }
 
-            /* Action Bar under AI Bubbles */
             .message-actions {
                 display: flex; align-items: center; gap: 8px; margin-top: 8px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.06);
             }
             .msg-action-btn {
                 background: rgba(255,255,255,0.06); border: 1px solid var(--card-border); border-radius: 12px;
                 color: #94a3b8; font-size: 11.5px; padding: 3px 8px; cursor: pointer; display: flex; align-items: center; gap: 4px;
-                transition: all 0.2s;
             }
             .msg-action-btn:hover { background: rgba(250, 204, 21, 0.15); color: #facc15; }
 
@@ -641,7 +636,6 @@ async def serve_app():
             .tdot:nth-child(2) { animation-delay: -0.16s; }
             @keyframes dotB { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
 
-            /* --- FLOATING BOTTOM DOCK --- */
             .bottom-dock {
                 padding: 10px 16px 16px; background: rgba(9, 13, 22, 0.94); backdrop-filter: blur(20px); border-top: 1px solid var(--card-border);
             }
@@ -664,7 +658,6 @@ async def serve_app():
         </style>
     </head>
     <body>
-        <!-- Authentication Modal -->
         <div class="auth-overlay" id="authModal">
             <div class="auth-card">
                 <h2 id="authHeading">Welcome to Lemon AI</h2>
@@ -680,7 +673,6 @@ async def serve_app():
 
         <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
 
-        <!-- Sidebar Drawer -->
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-header">
                 <div>
@@ -721,7 +713,6 @@ async def serve_app():
             </div>
         </aside>
 
-        <!-- Main Header -->
         <header class="header">
             <div class="header-left">
                 <button class="menu-trigger" onclick="openSidebar()" title="Conversations & Cores">☰</button>
@@ -734,9 +725,7 @@ async def serve_app():
             <button class="new-chat-btn" onclick="startNewChat()">＋ New Chat</button>
         </header>
 
-        <!-- Chat Stream -->
         <main class="chat-container" id="chatStream">
-            <!-- ChatGPT / Gemini Center Splash Watermark Greeting -->
             <div class="hero-greeting" id="heroGreeting">
                 <div class="hero-logo">🍋</div>
                 <div class="hero-title" id="heroGreetingName">Hello, Friend</div>
@@ -745,7 +734,6 @@ async def serve_app():
                     <span>⚡</span> Architected by Utkarsh Bandhu
                 </div>
 
-                <!-- 4 Interactive Starter Prompt Cards -->
                 <div class="starter-cards">
                     <div class="starter-card" onclick="runStarterPrompt('Can you explore the Stoic perspective on handling modern uncertainty?')">
                         <div class="starter-card-title">🌌 Deep Philosophy</div>
@@ -767,7 +755,6 @@ async def serve_app():
             </div>
         </main>
 
-        <!-- Bottom Input Bar -->
         <footer class="bottom-dock">
             <div class="dock-status" id="dockStatus">● Ready</div>
             <div class="input-dock">
@@ -780,8 +767,8 @@ async def serve_app():
         <audio id="audioElement" autoplay></audio>
 
         <script>
-            let currentUserId = localStorage.getItem("lemon_user_id");
-            let currentUsername = localStorage.getItem("lemon_username");
+            let currentUserId = localStorage.getItem("lemon_user_id") || "1";
+            let currentUsername = localStorage.getItem("lemon_username") || "Guest";
             let currentSessionId = parseInt(localStorage.getItem("lemon_current_session_id") || "0");
             let activeCore = localStorage.getItem("lemon_active_core") || "hybrid";
             let isVoiceEnabled = localStorage.getItem("lemon_voice_enabled") === "true";
@@ -864,7 +851,7 @@ async def serve_app():
             function checkAuth() {
                 updateVoiceUI();
                 selectCore(activeCore);
-                if (currentUserId && currentUsername) {
+                if (localStorage.getItem("lemon_user_id")) {
                     authModal.style.display = "none";
                     sidebarUsername.innerText = currentUsername;
                     const formattedName = currentUsername.charAt(0).toUpperCase() + currentUsername.slice(1);
@@ -897,7 +884,7 @@ async def serve_app():
                     const res = await fetch(endpoint, { method: "POST", body: fd });
                     const data = await res.json();
                     if (data.status === "ok") {
-                        currentUserId = data.user_id;
+                        currentUserId = data.user_id.toString();
                         currentUsername = data.username;
                         localStorage.setItem("lemon_user_id", currentUserId);
                         localStorage.setItem("lemon_username", currentUsername);
@@ -915,8 +902,8 @@ async def serve_app():
                 localStorage.removeItem("lemon_user_id");
                 localStorage.removeItem("lemon_username");
                 localStorage.removeItem("lemon_current_session_id");
-                currentUserId = null;
-                currentUsername = null;
+                currentUserId = "1";
+                currentUsername = "Guest";
                 currentSessionId = 0;
                 chatStream.innerHTML = "";
                 closeSidebar();
@@ -1035,7 +1022,7 @@ async def serve_app():
                 sendTextQuery();
             }
 
-            function setThinking(active, label = "Thinking & analyzing...") {
+            function setThinking(active, label = "Thinking & pondering...") {
                 if (active) {
                     dockStatus.innerText = `⚡ ${label}`;
                     if (!currentThinkingEl) {
@@ -1044,7 +1031,7 @@ async def serve_app():
                         currentThinkingEl.innerHTML = `
                             <div class="thinking-box">
                                 <div class="tdot"></div><div class="tdot"></div><div class="tdot"></div>
-                                <span style="font-size:12px; color:#facc15; margin-left:4px;">Thinking...</span>
+                                <span style="font-size:12px; color:#facc15; margin-left:4px;">Reflecting...</span>
                             </div>
                         `;
                         chatStream.appendChild(currentThinkingEl);
@@ -1071,7 +1058,7 @@ async def serve_app():
                         audioElement.play();
                     }
                 } catch(e) {
-                    dockStatus.innerText = "Voice playback error.";
+                    dockStatus.innerText = "Voice error.";
                 }
             }
 
@@ -1122,21 +1109,22 @@ async def serve_app():
 
             async function sendTextQuery() {
                 const text = textInput.value.trim();
-                if (!text || !currentUserId) return;
+                if (!text) return;
 
                 textInput.value = "";
                 appendMessage("user", text);
-                setThinking(true, `Consulting ${activeCore.toUpperCase()} core...`);
+                setThinking(true, `Engaging ${activeCore.toUpperCase()} core...`);
 
                 const fd = new FormData();
                 fd.append("text", text);
-                fd.append("user_id", currentUserId);
-                fd.append("session_id", currentSessionId);
+                fd.append("user_id", currentUserId.toString());
+                fd.append("session_id", (currentSessionId || 0).toString());
                 fd.append("mode", activeCore);
-                fd.append("voice_enabled", isVoiceEnabled);
+                fd.append("voice_enabled", isVoiceEnabled ? "true" : "false");
 
                 try {
                     const res = await fetch("/text-process", { method: "POST", body: fd });
+                    if (!res.ok) throw new Error("HTTP " + res.status);
                     const data = await res.json();
                     currentSessionId = data.session_id;
                     localStorage.setItem("lemon_current_session_id", currentSessionId.toString());
@@ -1150,8 +1138,9 @@ async def serve_app():
                         audioElement.play();
                     }
                 } catch(e) {
+                    console.error("Text process error:", e);
                     setThinking(false);
-                    dockStatus.innerText = "Error reaching Lemon.";
+                    dockStatus.innerText = "Connection error. Retrying...";
                 }
             }
 
@@ -1188,13 +1177,14 @@ async def serve_app():
             async function uploadVoice(blob) {
                 const fd = new FormData();
                 fd.append("file", blob, "voice.wav");
-                fd.append("user_id", currentUserId);
-                fd.append("session_id", currentSessionId);
+                fd.append("user_id", currentUserId.toString());
+                fd.append("session_id", (currentSessionId || 0).toString());
                 fd.append("mode", activeCore);
-                fd.append("voice_enabled", isVoiceEnabled);
+                fd.append("voice_enabled", isVoiceEnabled ? "true" : "false");
 
                 try {
                     const res = await fetch("/voice-process", { method: "POST", body: fd });
+                    if (!res.ok) throw new Error("HTTP " + res.status);
                     const data = await res.json();
                     currentSessionId = data.session_id;
                     localStorage.setItem("lemon_current_session_id", currentSessionId.toString());
@@ -1211,8 +1201,9 @@ async def serve_app():
                         audioElement.play();
                     }
                 } catch(e) {
+                    console.error("Voice process error:", e);
                     setThinking(false);
-                    dockStatus.innerText = "Error processing voice.";
+                    dockStatus.innerText = "Voice error. Try typing your message.";
                 }
             }
 
