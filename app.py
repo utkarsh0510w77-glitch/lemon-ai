@@ -38,9 +38,10 @@ def process_query_text(query: str) -> str:
     if clean.startswith(w):
       clean = clean[len(w) :].strip()
 
-  if not clean:
-    return "Yes! I am Lemon. Tell me what you need."
+  if not clean or clean in ["hi", "hello", "hey"]:
+    return "Hello! I am Lemon. What can I do for you?"
 
+  # 1. Quick commands
   if "time" in clean:
     return (
         f"The current time is {datetime.datetime.now().strftime('%I:%M %p')}."
@@ -50,30 +51,36 @@ def process_query_text(query: str) -> str:
     song = clean[5:].strip()
     return f"Playing {song} on YouTube."
 
+  # 2. Groq AI LLM Response
   if client:
-    for model in ["llama-3.1-8b-instant", "llama3-8b-8192"]:
-      try:
-        res = client.chat.completions.create(
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are Lemon, an elegant and concise mobile AI voice"
-                        " companion. Respond in 1 to 2 warm, natural spoken"
-                        " sentences."
-                    ),
-                },
-                {"role": "user", "content": clean},
-            ],
-            model=model,
-            max_tokens=70,
-            temperature=0.7,
-        )
-        return res.choices[0].message.content.strip()
-      except Exception:
-        continue
+    try:
+      chat_completion = client.chat.completions.create(
+          messages=[
+              {
+                  "role": "system",
+                  "content": (
+                      "You are Lemon, a friendly and smart AI assistant. Answer"
+                      " directly, naturally, and concisely in 1 to 2 spoken"
+                      " sentences."
+                  ),
+              },
+              {"role": "user", "content": clean},
+          ],
+          model="llama-3.1-8b-instant",
+          max_tokens=80,
+          temperature=0.7,
+      )
+      ai_reply = chat_completion.choices[0].message.content
+      if ai_reply:
+        return ai_reply.strip()
+    except Exception as e:
+      print("Groq Chat Error:", str(e))
+      return f"Groq Error: {str(e)}"
 
-  return f"I heard: {clean}"
+  # Fallback only if Groq API key is completely missing
+  return (
+      "GROQ_API_KEY environment variable is not configured in Render settings."
+  )
 
 
 @app.post("/voice-process")
@@ -91,10 +98,11 @@ async def voice_process(file: UploadFile = File(...)):
         )
         user_text = str(transcription).strip()
     except Exception as e:
-      print("STT Error:", e)
+      print("Whisper STT Error:", e)
 
   reply_text = process_query_text(user_text)
 
+  # Audio response
   reply_audio = "app_reply.mp3"
   tts = gTTS(text=reply_text, lang="en", slow=False)
   tts.save(reply_audio)
@@ -148,235 +156,50 @@ async def serve_app():
                 --border-glass: rgba(255, 255, 255, 0.08);
             }
 
-            * {
-                box-sizing: border-box;
-                margin: 0;
-                padding: 0;
-                font-family: 'Plus Jakarta Sans', -apple-system, sans-serif;
-                -webkit-tap-highlight-color: transparent;
-            }
+            * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', -apple-system, sans-serif; -webkit-tap-highlight-color: transparent; }
+            body { background: radial-gradient(circle at 50% 20%, #1e1b4b 0%, var(--bg-dark) 60%); color: var(--text-main); height: 100vh; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden; }
 
-            body {
-                background: radial-gradient(circle at 50% 20%, #1e1b4b 0%, var(--bg-dark) 60%);
-                color: var(--text-main);
-                height: 100vh;
-                display: flex;
-                flex-direction: column;
-                justify-content: space-between;
-                overflow: hidden;
-            }
-
-            /* Header */
-            .header {
-                padding: 16px 20px;
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-                backdrop-filter: blur(12px);
-                border-bottom: 1px solid var(--border-glass);
-            }
-            .brand {
-                display: flex;
-                align-items: center;
-                gap: 10px;
-            }
-            .brand-logo {
-                width: 36px;
-                height: 36px;
-                background: linear-gradient(135deg, #facc15, #f59e0b);
-                border-radius: 10px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                font-size: 20px;
-                box-shadow: 0 4px 12px var(--primary-glow);
-            }
-            .brand-title {
-                font-size: 17px;
-                font-weight: 700;
-                letter-spacing: -0.3px;
-            }
-            .badge-live {
-                display: flex;
-                align-items: center;
-                gap: 6px;
-                font-size: 12px;
-                color: #4ade80;
-                background: rgba(74, 222, 128, 0.1);
-                padding: 4px 10px;
-                border-radius: 20px;
-                border: 1px solid rgba(74, 222, 128, 0.2);
-            }
-            .dot {
-                width: 7px;
-                height: 7px;
-                background: #4ade80;
-                border-radius: 50%;
-                animation: blink 2s infinite;
-            }
+            .header { padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; backdrop-filter: blur(12px); border-bottom: 1px solid var(--border-glass); }
+            .brand { display: flex; align-items: center; gap: 10px; }
+            .brand-logo { width: 36px; height: 36px; background: linear-gradient(135deg, #facc15, #f59e0b); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 20px; box-shadow: 0 4px 12px var(--primary-glow); }
+            .brand-title { font-size: 17px; font-weight: 700; }
+            .badge-live { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #4ade80; background: rgba(74, 222, 128, 0.1); padding: 4px 10px; border-radius: 20px; border: 1px solid rgba(74, 222, 128, 0.2); }
+            .dot { width: 7px; height: 7px; background: #4ade80; border-radius: 50%; animation: blink 2s infinite; }
             @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 
-            /* Chat Stream */
-            .chat-container {
-                flex: 1;
-                overflow-y: auto;
-                padding: 20px 16px;
-                display: flex;
-                flex-direction: column;
-                gap: 14px;
-                scroll-behavior: smooth;
-            }
+            .chat-container { flex: 1; overflow-y: auto; padding: 20px 16px; display: flex; flex-direction: column; gap: 14px; scroll-behavior: smooth; }
             .chat-container::-webkit-scrollbar { display: none; }
 
-            .bubble {
-                max-width: 82%;
-                padding: 12px 16px;
-                border-radius: 18px;
-                font-size: 14px;
-                line-height: 1.45;
-                animation: fadeIn 0.3s ease;
-            }
-            @keyframes fadeIn {
-                from { opacity: 0; transform: translateY(8px); }
-                to { opacity: 1; transform: translateY(0); }
-            }
+            .bubble { max-width: 82%; padding: 12px 16px; border-radius: 18px; font-size: 14px; line-height: 1.45; animation: fadeIn 0.3s ease; }
+            @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
-            .bubble.lemon {
-                align-self: flex-start;
-                background: var(--card-bg);
-                backdrop-filter: blur(10px);
-                border: 1px solid var(--border-glass);
-                color: #e2e8f0;
-                border-bottom-left-radius: 4px;
-            }
+            .bubble.lemon { align-self: flex-start; background: var(--card-bg); backdrop-filter: blur(10px); border: 1px solid var(--border-glass); color: #e2e8f0; border-bottom-left-radius: 4px; }
             .bubble.lemon b { color: var(--primary); }
 
-            .bubble.user {
-                align-self: flex-end;
-                background: linear-gradient(135deg, #facc15, #f59e0b);
-                color: #0f172a;
-                font-weight: 500;
-                border-bottom-right-radius: 4px;
-                box-shadow: 0 4px 14px var(--primary-glow);
-            }
+            .bubble.user { align-self: flex-end; background: linear-gradient(135deg, #facc15, #f59e0b); color: #0f172a; font-weight: 500; border-bottom-right-radius: 4px; box-shadow: 0 4px 14px var(--primary-glow); }
 
-            /* Voice Interactive Center (Siri/Orb Style) */
-            .voice-section {
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                justify-content: center;
-                padding: 10px 0 16px;
-            }
-
-            .orb-outer {
-                position: relative;
-                width: 100px;
-                height: 100px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-            }
-
-            .wave-ring {
-                position: absolute;
-                width: 100%;
-                height: 100%;
-                border-radius: 50%;
-                background: radial-gradient(circle, var(--primary-glow) 0%, transparent 70%);
-                opacity: 0;
-                pointer-events: none;
-            }
-
-            .orb-btn {
-                width: 76px;
-                height: 76px;
-                border-radius: 50%;
-                background: linear-gradient(135deg, #fde047 0%, #eab308 50%, #ca8a04 100%);
-                border: none;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                font-size: 32px;
-                cursor: pointer;
-                box-shadow: 0 0 25px var(--primary-glow), inset 0 2px 4px rgba(255,255,255,0.4);
-                transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
-                z-index: 2;
-            }
+            .voice-section { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 10px 0 16px; }
+            .orb-outer { position: relative; width: 100px; height: 100px; display: flex; align-items: center; justify-content: center; }
+            .wave-ring { position: absolute; width: 100%; height: 100%; border-radius: 50%; background: radial-gradient(circle, var(--primary-glow) 0%, transparent 70%); opacity: 0; pointer-events: none; }
+            .orb-btn { width: 76px; height: 76px; border-radius: 50%; background: linear-gradient(135deg, #fde047 0%, #eab308 50%, #ca8a04 100%); border: none; display: flex; align-items: center; justify-content: center; font-size: 32px; cursor: pointer; box-shadow: 0 0 25px var(--primary-glow); transition: transform 0.2s; z-index: 2; }
             .orb-btn:active { transform: scale(0.9); }
 
-            /* Dynamic Listening Pulse State */
-            .listening .wave-ring {
-                animation: pulseRing 1.8s infinite;
-                opacity: 1;
-            }
-            .listening .orb-btn {
-                animation: orbGlow 1.2s infinite alternate;
-            }
+            .listening .wave-ring { animation: pulseRing 1.8s infinite; opacity: 1; }
+            .listening .orb-btn { animation: orbGlow 1.2s infinite alternate; }
 
-            @keyframes pulseRing {
-                0% { transform: scale(0.8); opacity: 0.9; }
-                100% { transform: scale(2.2); opacity: 0; }
-            }
-            @keyframes orbGlow {
-                0% { box-shadow: 0 0 20px var(--primary-glow); }
-                100% { box-shadow: 0 0 45px rgba(250, 204, 21, 0.9); }
-            }
+            @keyframes pulseRing { 0% { transform: scale(0.8); opacity: 0.9; } 100% { transform: scale(2.2); opacity: 0; } }
+            @keyframes orbGlow { 0% { box-shadow: 0 0 20px var(--primary-glow); } 100% { box-shadow: 0 0 45px rgba(250, 204, 21, 0.9); } }
 
-            .status-label {
-                font-size: 13px;
-                font-weight: 500;
-                color: var(--text-muted);
-                margin-top: 10px;
-                letter-spacing: 0.2px;
-            }
+            .status-label { font-size: 13px; font-weight: 500; color: var(--text-muted); margin-top: 10px; }
 
-            /* Bottom Input Floating Bar */
-            .bottom-bar {
-                padding: 12px 16px 20px;
-                backdrop-filter: blur(16px);
-                background: rgba(15, 23, 42, 0.6);
-                border-top: 1px solid var(--border-glass);
-            }
-            .input-wrapper {
-                display: flex;
-                align-items: center;
-                background: rgba(30, 41, 59, 0.8);
-                border: 1px solid var(--border-glass);
-                border-radius: 28px;
-                padding: 5px 6px 5px 18px;
-                box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
-            }
-            .input-wrapper input {
-                flex: 1;
-                background: transparent;
-                border: none;
-                color: #fff;
-                font-size: 14.5px;
-                outline: none;
-            }
-            .input-wrapper input::placeholder {
-                color: #64748b;
-            }
-            .send-circle {
-                width: 38px;
-                height: 38px;
-                border-radius: 50%;
-                background: var(--primary);
-                border: none;
-                color: #0f172a;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                cursor: pointer;
-                font-size: 16px;
-                transition: transform 0.15s;
-            }
-            .send-circle:active { transform: scale(0.9); }
+            .bottom-bar { padding: 12px 16px 20px; backdrop-filter: blur(16px); background: rgba(15, 23, 42, 0.6); border-top: 1px solid var(--border-glass); }
+            .input-wrapper { display: flex; align-items: center; background: rgba(30, 41, 59, 0.8); border: 1px solid var(--border-glass); border-radius: 28px; padding: 5px 6px 5px 18px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3); }
+            .input-wrapper input { flex: 1; background: transparent; border: none; color: #fff; font-size: 14.5px; outline: none; }
+            .input-wrapper input::placeholder { color: #64748b; }
+            .send-circle { width: 38px; height: 38px; border-radius: 50%; background: var(--primary); border: none; color: #0f172a; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 16px; }
         </style>
     </head>
     <body>
-        <!-- Header -->
         <div class="header">
             <div class="brand">
                 <div class="brand-logo">🍋</div>
@@ -388,14 +211,12 @@ async def serve_app():
             </div>
         </div>
 
-        <!-- Scrollable Chat Stream -->
         <div class="chat-container" id="chatStream">
             <div class="bubble lemon">
                 Hey there! I'm <b>Lemon</b>. Tap the mic below or type anytime to ask me anything.
             </div>
         </div>
 
-        <!-- Voice Orb Action -->
         <div class="voice-section">
             <div class="orb-outer" id="orbOuter">
                 <div class="wave-ring"></div>
@@ -404,7 +225,6 @@ async def serve_app():
             <div class="status-label" id="statusLabel">Tap mic to speak</div>
         </div>
 
-        <!-- Floating Input Footer -->
         <div class="bottom-bar">
             <div class="input-wrapper">
                 <input type="text" id="textInput" placeholder="Ask Lemon anything..." onkeydown="if(event.key==='Enter') sendManualQuery()" />
@@ -420,7 +240,6 @@ async def serve_app():
             let recordedChunks = [];
 
             const orbOuter = document.getElementById("orbOuter");
-            const orbBtn = document.getElementById("orbBtn");
             const statusLabel = document.getElementById("statusLabel");
             const chatStream = document.getElementById("chatStream");
             const textInput = document.getElementById("textInput");
