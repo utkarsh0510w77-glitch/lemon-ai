@@ -25,24 +25,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-def ensure_complete_sentence(text: str) -> str:
-    """Removes any trailing truncated words and ensures it ends on a complete sentence."""
-    text = text.strip()
-    if not text:
-        return text
-
-    # If it ends with punctuation, it is complete
-    if text[-1] in [".", "!", "?"]:
-        return text
-
-    # Find the last sentence end
-    last_punct = max(text.rfind("."), text.rfind("!"), text.rfind("?"))
-    if last_punct != -1:
-        return text[: last_punct + 1].strip()
-
-    # Otherwise just append a full stop
-    return text + "."
-
 def ask_groq_llm(user_prompt: str) -> str:
     models_to_try = [
         "openai/gpt-oss-20b",
@@ -56,22 +38,24 @@ def ask_groq_llm(user_prompt: str) -> str:
                     {
                         "role": "system",
                         "content": (
-                            "You are Lemon, a voice assistant. Give a direct answer in exactly 2 or 3 short, complete sentences. "
-                            "Do not write essays, headings, bullet points, asterisks, or markdown. "
-                            "Make sure every sentence finishes completely."
+                            "You are Lemon, an intelligent and articulate AI voice assistant. "
+                            "Thoroughly and completely explain your thoughts and answer the user's question without cutting off. "
+                            "Take as many words and sentences as necessary to fully conclude your views. "
+                            "Speak in a natural, flowing, conversational style. "
+                            "Do not use markdown formatting like tables, pipes (|), asterisks (*), or hashes (#) so your words can be read aloud cleanly."
                         )
                     },
                     {"role": "user", "content": user_prompt}
                 ],
                 model=m,
-                max_tokens=400,  # Generous headroom so it never cuts off
-                temperature=0.5
+                max_tokens=2048,  # Huge token limit so it NEVER runs out of words
+                temperature=0.6
             )
             if chat.choices and chat.choices[0].message.content:
                 reply = chat.choices[0].message.content.strip()
-                # Clean markdown characters
+                # Clean up any markdown characters that interfere with reading
                 clean = re.sub(r'[*#|_>`]', '', reply).strip()
-                return ensure_complete_sentence(clean)
+                return clean
         except Exception as e:
             print(f"Model {m} failed: {e}")
             continue
@@ -120,6 +104,7 @@ async def voice_process(file: UploadFile = File(...)):
 
     reply_text = process_query_text(user_text)
 
+    # Audio synthesis with no length limit
     reply_audio = "app_reply.mp3"
     tts = gTTS(text=reply_text, lang="en", slow=False)
     tts.save(reply_audio)
@@ -249,12 +234,14 @@ async def serve_app():
             .chat-container::-webkit-scrollbar { display: none; }
 
             .bubble {
-                max-width: 85%;
-                padding: 14px 16px;
+                max-width: 88%;
+                padding: 14px 18px;
                 border-radius: 18px;
                 font-size: 14.5px;
-                line-height: 1.5;
+                line-height: 1.6;
                 animation: fadeIn 0.3s ease;
+                white-space: pre-wrap;
+                word-wrap: break-word;
             }
             @keyframes fadeIn {
                 from { opacity: 0; transform: translateY(8px); }
@@ -285,13 +272,13 @@ async def serve_app():
                 flex-direction: column;
                 align-items: center;
                 justify-content: center;
-                padding: 10px 0 16px;
+                padding: 8px 0 14px;
             }
 
             .orb-outer {
                 position: relative;
-                width: 100px;
-                height: 100px;
+                width: 90px;
+                height: 90px;
                 display: flex;
                 align-items: center;
                 justify-content: center;
@@ -308,15 +295,15 @@ async def serve_app():
             }
 
             .orb-btn {
-                width: 76px;
-                height: 76px;
+                width: 72px;
+                height: 72px;
                 border-radius: 50%;
                 background: linear-gradient(135deg, #fde047 0%, #eab308 50%, #ca8a04 100%);
                 border: none;
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                font-size: 32px;
+                font-size: 30px;
                 cursor: pointer;
                 box-shadow: 0 0 25px var(--primary-glow);
                 transition: transform 0.2s;
@@ -345,11 +332,11 @@ async def serve_app():
                 font-size: 13.5px;
                 font-weight: 500;
                 color: var(--text-muted);
-                margin-top: 10px;
+                margin-top: 8px;
             }
 
             .bottom-bar {
-                padding: 12px 16px 20px;
+                padding: 12px 16px 18px;
                 backdrop-filter: blur(16px);
                 background: rgba(15, 23, 42, 0.6);
                 border-top: 1px solid var(--border-glass);
