@@ -21,6 +21,34 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Active supported models on Groq
+FALLBACK_MODELS = [
+    "openai/gpt-oss-20b",
+    "openai/gpt-oss-120b",
+    "qwen/qwen3.8-27b",
+    "meta-llama/llama-4-scout-17b-16e-instruct",
+]
+
+
+def get_available_chat_model() -> str:
+  """Dynamically selects an available chat model from Groq account."""
+  if not client:
+    return FALLBACK_MODELS[0]
+  try:
+    models_data = client.models.list()
+    available_ids = [m.id for m in models_data.data]
+    # Match preferred models
+    for pref in FALLBACK_MODELS:
+      if pref in available_ids:
+        return pref
+    # Pick any text generation model if fallback doesn't match
+    for m_id in available_ids:
+      if "whisper" not in m_id and "guard" not in m_id:
+        return m_id
+  except Exception as e:
+    print("Could not fetch models dynamically:", e)
+  return FALLBACK_MODELS[0]
+
 
 def process_query_text(query: str) -> str:
   if not query:
@@ -51,33 +79,55 @@ def process_query_text(query: str) -> str:
     song = clean[5:].strip()
     return f"Playing {song} on YouTube."
 
-  # 2. Groq AI LLM Response
+  # 2. Dynamic Groq AI Completion
   if client:
+    target_model = get_available_chat_model()
     try:
       chat_completion = client.chat.completions.create(
           messages=[
               {
                   "role": "system",
                   "content": (
-                      "You are Lemon, a friendly and smart AI assistant. Answer"
-                      " directly, naturally, and concisely in 1 to 2 spoken"
-                      " sentences."
+                      "You are Lemon, a friendly and intelligent AI assistant."
+                      " Answer directly, naturally, and concisely in 1 to 2"
+                      " spoken sentences."
                   ),
               },
               {"role": "user", "content": clean},
           ],
-          model="llama-3.1-8b-instant",
-          max_tokens=80,
+          model=target_model,
+          max_tokens=90,
           temperature=0.7,
       )
       ai_reply = chat_completion.choices[0].message.content
       if ai_reply:
         return ai_reply.strip()
     except Exception as e:
-      print("Groq Chat Error:", str(e))
+      print(f"Error using {target_model}:", str(e))
+      # Try fallbacks
+      for alt_model in FALLBACK_MODELS:
+        if alt_model == target_model:
+          continue
+        try:
+          alt_res = client.chat.completions.create(
+              messages=[
+                  {
+                      "role": "system",
+                      "content": (
+                          "You are Lemon, answer concisely in 1-2 spoken"
+                          " sentences."
+                      ),
+                  },
+                  {"role": "user", "content": clean},
+              ],
+              model=alt_model,
+              max_tokens=90,
+          )
+          return alt_res.choices[0].message.content.strip()
+        except Exception:
+          continue
       return f"Groq Error: {str(e)}"
 
-  # Fallback only if Groq API key is completely missing
   return (
       "GROQ_API_KEY environment variable is not configured in Render settings."
   )
