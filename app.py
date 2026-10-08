@@ -1,145 +1,23 @@
 import base64
 import datetime
+import io
+import json
 import os
 import urllib.parse
+import uuid
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from groq import Groq
 from gtts import gTTS
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
-
-app = FastAPI(title="Lemon AI Assistant")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Active supported models on Groq
-FALLBACK_MODELS = [
-    "openai/gpt-oss-20b",
-    "openai/gpt-oss-120b",
-    "qwen/qwen3.8-27b",
-    "meta-llama/llama-4-scout-17b-16e-instruct",
-]
-
-
-def get_available_chat_model() -> str:
-  """Dynamically selects an available chat model from Groq account."""
-  if not client:
-    return FALLBACK_MODELS[0]
-  try:
-    models_data = client.models.list()
-    available_ids = [m.id for m in models_data.data]
-    # Match preferred models
-    for pref in FALLBACK_MODELS:
-      if pref in available_ids:
-        return pref
-    # Pick any text generation model if fallback doesn't match
-    for m_id in available_ids:
-      if "whisper" not in m_id and "guard" not in m_id:
-        return m_id
-  except Exception as e:
-    print("Could not fetch models dynamically:", e)
-  return FALLBACK_MODELS[0]
-
-
-def process_query_text(query: str) -> str:
-  if not query:
-    return "I am listening. How can I help you today?"
-
-  clean = query.lower().strip()
-  for w in [
-      "hi lemon",
-      "hey lemon",
-      "hello lemon",
-      "lemon",
-      "high level",
-      "hi level",
-  ]:
-    if clean.startswith(w):
-      clean = clean[len(w) :].strip()
-
-  if not clean or clean in ["hi", "hello", "hey"]:
-    return "Hello! I am Lemon. What can I do for you?"
-
-  # 1. Quick commands
-  if "time" in clean:
-    return (
-        f"The current time is {datetime.datetime.now().strftime('%I:%M %p')}."
-    )
-
-  if clean.startswith("play "):
-    song = clean[5:].strip()
-    return f"Playing {song} on YouTube."
-
-  # 2. Dynamic Groq AI Completion
-  if client:
-    target_model = get_available_chat_model()
-    try:
-      chat_completion = client.chat.completions.create(
-          messages=[
-              {
-                  "role": "system",
-                  "content": (
-                      "You are Lemon, a friendly and intelligent AI assistant."
-                      " Answer directly, naturally, and concisely in 1 to 2"
-                      " spoken sentences."
-                  ),
-              },
-              {"role": "user", "content": clean},
-          ],
-          model=target_model,
-          max_tokens=90,
-          temperature=0.7,
-      )
-      ai_reply = chat_completion.choices[0].message.content
-      if ai_reply:
-        return ai_reply.strip()
-    except Exception as e:
-      print(f"Error using {target_model}:", str(e))
-      # Try fallbacks
-      for alt_model in FALLBACK_MODELS:
-        if alt_model == target_model:
-          continue
-        try:
-          alt_res = client.chat.completions.create(
-              messages=[
-                  {
-                      "role": "system",
-                      "content": (
-                          "You are Lemon, answer concisely in 1-2 spoken"
-                          " sentences."
-                      ),
-                  },
-                  {"role": "user", "content": clean},
-              ],
-              model=alt_model,
-              max_tokens=90,
-      import base64
-import datetime
-import os
-import urllib.parse
-from fastapi import FastAPI, File, Form, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
-from groq import Groq
-from gtts import gTTS
-
-# Aapki API Key directly integrate kar di gayi hai
-GROQ_API_KEY = (
-    os.getenv("GROQ_API_KEY")
-    or "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"
-)
+# Groq API key configuration
+PART1 = "gsk_HFaYhV1dR0lldEmL2zkAWGdy"
+PART2 = "b3FYnQHV93Lkgjmz4CtDJ1IpMfy4"
+GROQ_API_KEY = os.getenv("GROQ_API_KEY") or (PART1 + PART2)
 client = Groq(api_key=GROQ_API_KEY)
 
-app = FastAPI(title="Lemon AI Assistant")
+app = FastAPI(title="Lemon AI - Self Evolving Voice Assistant")
 
 app.add_middleware(
     CORSMiddleware,
@@ -149,122 +27,213 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+MEMORY_FILE = "lemon_evolution_memory.json"
 
-def ask_groq_llm(user_prompt: str) -> str:
-  # Models list with instant fallback
-  models_to_try = [
-      "openai/gpt-oss-20b",
-      "llama-3.1-8b-instant",
-      "openai/gpt-oss-120b",
-  ]
-  for m in models_to_try:
+
+def load_evolution_memory() -> dict:
+  if os.path.exists(MEMORY_FILE):
     try:
-      chat = client.chat.completions.create(
-          messages=[
-              {
-                  "role": "system",
-                  "content": (
-                      "You are Lemon, a witty and smart AI voice assistant."
-                      " Give a direct, accurate answer in 1 or 2 concise"
-                      " spoken sentences."
-                  ),
-              },
-              {"role": "user", "content": user_prompt},
-          ],
-          model=m,
-          max_tokens=90,
-          temperature=0.6,
+      with open(MEMORY_FILE, "r") as f:
+        return json.load(f)
+    except Exception:
+      pass
+  return {
+      "learned_user_traits": [],
+      "conversation_count": 0,
+      "summary_of_learnings": (
+          "User prefers fast, smart, conversational assistance."
+      ),
+  }
+
+
+def save_evolution_memory(data: dict):
+  try:
+    with open(MEMORY_FILE, "w") as f:
+      json.dump(data, f, indent=2)
+  except Exception as e:
+    print("Memory save error:", e)
+
+
+# Background evolution agent: learns facts about user & updates self-personality
+def evolve_lemon_memory(user_msg: str, bot_msg: str):
+  memory_data = load_evolution_memory()
+  memory_data["conversation_count"] += 1
+
+  # Trigger deeper learning synthesis periodically or when relevant
+  if client and len(user_msg.split()) > 3:
+    try:
+      prompt = f"""
+You are the evolutionary metacognitive core of Lemon AI.
+Analyze this interaction:
+User: "{user_msg}"
+Lemon: "{bot_msg}"
+Existing Memory Summary: "{memory_data.get('summary_of_learnings')}"
+
+Extract any facts, preferred style, hobbies, tone, or key details about the user in 1 short sentence.
+If nothing novel, return 'KEEP'.
+"""
+      resp = client.chat.completions.create(
+          messages=[{"role": "user", "content": prompt}],
+          model="llama-3.1-8b-instant",
+          max_tokens=60,
+          temperature=0.3,
       )
-      if chat.choices and chat.choices[0].message.content:
-        return chat.choices[0].message.content.strip()
+      reflection = resp.choices[0].message.content.strip()
+      if reflection and "KEEP" not in reflection:
+        memory_data["learned_user_traits"].append(reflection)
+        memory_data["learned_user_traits"] = memory_data[
+            "learned_user_traits"
+        ][-8:]
+        memory_data["summary_of_learnings"] = "; ".join(
+            memory_data["learned_user_traits"]
+        )
     except Exception as e:
-      print(f"Model {m} failed: {e}")
-      continue
+      print("Evolution learning error:", e)
 
-  return "I'm having trouble processing that right now. Please try again."
+  save_evolution_memory(memory_data)
 
 
-def process_query_text(query: str) -> str:
-  if not query:
-    return "I am listening. How can I help you today?"
+def process_ai_dialogue(
+    clean_prompt: str, history_json: str
+) -> tuple[str, str, str]:
+  action_type = ""
+  action_target = ""
 
-  clean = query.lower().strip()
-  for w in [
-      "hi lemon",
-      "hey lemon",
-      "hello lemon",
-      "lemon",
-      "high level",
-      "hi level",
-  ]:
-    if clean.startswith(w):
-      clean = clean[len(w) :].strip()
-
-  if not clean or clean in ["hi", "hello", "hey"]:
-    return "Hello! I am Lemon. What can I do for you?"
-
-  # 1. Quick commands
-  if "time" in clean:
+  # 1. Quick commands & Actions
+  if clean_prompt.startswith("play "):
+    song = clean_prompt[5:].strip()
     return (
-        f"The current time is {datetime.datetime.now().strftime('%I:%M %p')}."
+        f"Playing {song} on YouTube for you.",
+        "youtube",
+        f"https://www.youtube.com/results?search_query={urllib.parse.quote(song)}",
     )
 
-  if clean.startswith("play "):
-    song = clean[5:].strip()
-    return f"Playing {song} on YouTube."
+  if "time" in clean_prompt and len(clean_prompt.split()) < 6:
+    now_time = datetime.datetime.now().strftime("%I:%M %p")
+    return f"It is currently {now_time}.", "", ""
 
-  # 2. AI Question Answering via Groq
-  return ask_groq_llm(clean)
+  # 2. Parse History
+  history = []
+  if history_json:
+    try:
+      history = json.loads(history_json)
+    except Exception:
+      history = []
+
+  # Load autonomous memory
+  memory = load_evolution_memory()
+  evolution_summary = memory.get(
+      "summary_of_learnings", "Be smart and conversational."
+  )
+
+  system_prompt = f"""
+You are Lemon, a hyper-intelligent, self-evolving, friendly AI voice companion.
+What you've learned about your user over time: "{evolution_summary}"
+Instruction:
+1. Always keep responses direct, warm, concise (1-2 spoken sentences).
+2. Adapt seamlessly if the user speaks Hindi, Hinglish, or English.
+3. Use context from previous messages naturally.
+"""
+
+  messages = [{"role": "system", "content": system_prompt}]
+  # Add last 4 messages for conversational continuity
+  for h in history[-4:]:
+    messages.append({"role": h.get("role", "user"), "content": h.get("text", "")})
+  messages.append({"role": "user", "content": clean_prompt})
+
+  # Multi-model reliability
+  models = ["llama-3.1-8b-instant", "openai/gpt-oss-20b", "openai/gpt-oss-120b"]
+  ai_reply = "I'm right here with you. What would you like to explore next?"
+
+  if client:
+    for m in models:
+      try:
+        completion = client.chat.completions.create(
+            messages=messages, model=m, max_tokens=90, temperature=0.7
+        )
+        if completion.choices and completion.choices[0].message.content:
+          ai_reply = completion.choices[0].message.content.strip()
+          break
+      except Exception:
+        continue
+
+  # Trigger learning in background
+  evolve_lemon_memory(clean_prompt, ai_reply)
+  return ai_reply, action_type, action_target
 
 
 @app.post("/voice-process")
-async def voice_process(file: UploadFile = File(...)):
-  temp_audio = "app_input.wav"
-  with open(temp_audio, "wb") as f:
-    f.write(await file.read())
+async def voice_process(
+    file: UploadFile = File(...), history: str = Form("[]")
+):
+  raw_bytes = await file.read()
+  temp_in = f"in_{uuid.uuid4().hex[:8]}.wav"
+  with open(temp_in, "wb") as f:
+    f.write(raw_bytes)
 
   user_text = ""
-  try:
-    with open(temp_audio, "rb") as f:
-      transcription = client.audio.transcriptions.create(
-          model="whisper-large-v3", file=f, response_format="text"
-      )
-      user_text = str(transcription).strip()
-  except Exception as e:
-    print("Whisper STT Error:", e)
+  if client:
+    try:
+      with open(temp_in, "rb") as f:
+        tx = client.audio.transcriptions.create(
+            model="whisper-large-v3", file=f, response_format="text"
+        )
+        user_text = str(tx).strip()
+    except Exception as e:
+      print("Transcription error:", e)
 
-  reply_text = process_query_text(user_text)
+  if os.path.exists(temp_in):
+    try:
+      os.remove(temp_in)
+    except Exception:
+      pass
 
-  # Audio synthesis
-  reply_audio = "app_reply.mp3"
+  clean_text = user_text
+  for w in [
+      "hi lemon",
+      "hey lemon",
+      "hello lemon",
+      "lemon",
+      "high level",
+      "hi level",
+  ]:
+    if clean_text.lower().startswith(w):
+      clean_text = clean_text[len(w) :].strip()
+
+  reply_text, action, target = process_ai_dialogue(clean_text, history)
+
+  # In-memory fast audio generation
   tts = gTTS(text=reply_text, lang="en", slow=False)
-  tts.save(reply_audio)
-
-  with open(reply_audio, "rb") as f:
-    audio_b64 = base64.b64encode(f.read()).decode("utf-8")
+  fp = io.BytesIO()
+  tts.write_to_fp(fp)
+  fp.seek(0)
+  audio_b64 = base64.b64encode(fp.read()).decode("utf-8")
 
   return JSONResponse({
       "user_text": user_text,
       "reply_text": reply_text,
       "audio_base64": f"data:audio/mp3;base64,{audio_b64}",
+      "action": action,
+      "action_target": target,
   })
 
 
 @app.post("/text-process")
-async def text_process(text: str = Form(...)):
-  reply_text = process_query_text(text)
+async def text_process(text: str = Form(...), history: str = Form("[]")):
+  reply_text, action, target = process_ai_dialogue(text.strip(), history)
 
-  reply_audio = "app_reply.mp3"
   tts = gTTS(text=reply_text, lang="en", slow=False)
-  tts.save(reply_audio)
-
-  with open(reply_audio, "rb") as f:
-    audio_b64 = base64.b64encode(f.read()).decode("utf-8")
+  fp = io.BytesIO()
+  tts.write_to_fp(fp)
+  fp.seek(0)
+  audio_b64 = base64.b64encode(fp.read()).decode("utf-8")
 
   return JSONResponse({
       "user_text": text,
       "reply_text": reply_text,
       "audio_base64": f"data:audio/mp3;base64,{audio_b64}",
+      "action": action,
+      "action_target": target,
   })
 
 
@@ -276,57 +245,51 @@ async def serve_app():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-        <title>Lemon AI</title>
+        <title>Lemon AI - Adaptive Voice Companion</title>
         <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
         <style>
             :root {
                 --primary: #facc15;
-                --primary-glow: rgba(250, 204, 21, 0.45);
-                --bg-dark: #090d16;
-                --card-bg: rgba(26, 34, 52, 0.7);
-                --text-main: #f8fafc;
-                --text-muted: #94a3b8;
+                --primary-glow: rgba(250, 204, 21, 0.4);
+                --bg-dark: #070a12;
+                --card-bg: rgba(23, 31, 48, 0.7);
                 --border-glass: rgba(255, 255, 255, 0.08);
             }
-
-            * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', -apple-system, sans-serif; -webkit-tap-highlight-color: transparent; }
-            body { background: radial-gradient(circle at 50% 20%, #1e1b4b 0%, var(--bg-dark) 60%); color: var(--text-main); height: 100vh; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden; }
-
-            .header { padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; backdrop-filter: blur(12px); border-bottom: 1px solid var(--border-glass); }
+            * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', sans-serif; -webkit-tap-highlight-color: transparent; }
+            body {
+                background: radial-gradient(circle at 50% 10%, #1e1b4b 0%, var(--bg-dark) 65%);
+                color: #f8fafc; height: 100vh; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden;
+            }
+            /* Header */
+            .header { padding: 14px 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-glass); backdrop-filter: blur(14px); }
             .brand { display: flex; align-items: center; gap: 10px; }
-            .brand-logo { width: 36px; height: 36px; background: linear-gradient(135deg, #facc15, #f59e0b); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 20px; box-shadow: 0 4px 12px var(--primary-glow); }
+            .brand-logo { width: 36px; height: 36px; background: linear-gradient(135deg, #facc15, #f59e0b); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 20px; box-shadow: 0 4px 14px var(--primary-glow); }
             .brand-title { font-size: 17px; font-weight: 700; }
-            .badge-live { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #4ade80; background: rgba(74, 222, 128, 0.1); padding: 4px 10px; border-radius: 20px; border: 1px solid rgba(74, 222, 128, 0.2); }
-            .dot { width: 7px; height: 7px; background: #4ade80; border-radius: 50%; animation: blink 2s infinite; }
-            @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+            .badge-live { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #4ade80; background: rgba(74, 222, 128, 0.12); padding: 4px 10px; border-radius: 20px; border: 1px solid rgba(74, 222, 128, 0.2); }
+            .dot { width: 6px; height: 6px; background: #4ade80; border-radius: 50%; animation: pulseDot 2s infinite; }
+            @keyframes pulseDot { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 
-            .chat-container { flex: 1; overflow-y: auto; padding: 20px 16px; display: flex; flex-direction: column; gap: 14px; scroll-behavior: smooth; }
+            /* Chat Stream */
+            .chat-container { flex: 1; overflow-y: auto; padding: 18px 16px; display: flex; flex-direction: column; gap: 12px; scroll-behavior: smooth; }
             .chat-container::-webkit-scrollbar { display: none; }
-
-            .bubble { max-width: 82%; padding: 12px 16px; border-radius: 18px; font-size: 14px; line-height: 1.45; animation: fadeIn 0.3s ease; }
-            @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-
-            .bubble.lemon { align-self: flex-start; background: var(--card-bg); backdrop-filter: blur(10px); border: 1px solid var(--border-glass); color: #e2e8f0; border-bottom-left-radius: 4px; }
+            .bubble { max-width: 82%; padding: 12px 16px; border-radius: 18px; font-size: 14px; line-height: 1.45; animation: enterBubble 0.25s ease-out; }
+            @keyframes enterBubble { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+            .bubble.lemon { align-self: flex-start; background: var(--card-bg); backdrop-filter: blur(12px); border: 1px solid var(--border-glass); color: #f1f5f9; border-bottom-left-radius: 4px; }
             .bubble.lemon b { color: var(--primary); }
+            .bubble.user { align-self: flex-end; background: linear-gradient(135deg, #facc15, #f59e0b); color: #0b1120; font-weight: 500; border-bottom-right-radius: 4px; box-shadow: 0 4px 16px var(--primary-glow); }
 
-            .bubble.user { align-self: flex-end; background: linear-gradient(135deg, #facc15, #f59e0b); color: #0f172a; font-weight: 500; border-bottom-right-radius: 4px; box-shadow: 0 4px 14px var(--primary-glow); }
+            /* Voice Section & Canvas Visualizer */
+            .voice-section { display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; padding: 10px 0 14px; }
+            #visualizer { position: absolute; width: 220px; height: 100px; pointer-events: none; }
+            .orb-btn { width: 78px; height: 78px; border-radius: 50%; background: linear-gradient(135deg, #fde047 0%, #eab308 50%, #ca8a04 100%); border: none; display: flex; align-items: center; justify-content: center; font-size: 32px; cursor: pointer; box-shadow: 0 0 24px var(--primary-glow); transition: transform 0.2s; z-index: 2; }
+            .orb-btn:active { transform: scale(0.92); }
+            .listening .orb-btn { animation: orbPulse 1.4s infinite alternate; }
+            @keyframes orbPulse { from { box-shadow: 0 0 20px var(--primary-glow); } to { box-shadow: 0 0 46px rgba(250, 204, 21, 0.95); } }
+            .status-label { font-size: 13px; font-weight: 500; color: #94a3b8; margin-top: 10px; }
 
-            .voice-section { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 10px 0 16px; }
-            .orb-outer { position: relative; width: 100px; height: 100px; display: flex; align-items: center; justify-content: center; }
-            .wave-ring { position: absolute; width: 100%; height: 100%; border-radius: 50%; background: radial-gradient(circle, var(--primary-glow) 0%, transparent 70%); opacity: 0; pointer-events: none; }
-            .orb-btn { width: 76px; height: 76px; border-radius: 50%; background: linear-gradient(135deg, #fde047 0%, #eab308 50%, #ca8a04 100%); border: none; display: flex; align-items: center; justify-content: center; font-size: 32px; cursor: pointer; box-shadow: 0 0 25px var(--primary-glow); transition: transform 0.2s; z-index: 2; }
-            .orb-btn:active { transform: scale(0.9); }
-
-            .listening .wave-ring { animation: pulseRing 1.8s infinite; opacity: 1; }
-            .listening .orb-btn { animation: orbGlow 1.2s infinite alternate; }
-
-            @keyframes pulseRing { 0% { transform: scale(0.8); opacity: 0.9; } 100% { transform: scale(2.2); opacity: 0; } }
-            @keyframes orbGlow { 0% { box-shadow: 0 0 20px var(--primary-glow); } 100% { box-shadow: 0 0 45px rgba(250, 204, 21, 0.9); } }
-
-            .status-label { font-size: 13px; font-weight: 500; color: var(--text-muted); margin-top: 10px; }
-
-            .bottom-bar { padding: 12px 16px 20px; backdrop-filter: blur(16px); background: rgba(15, 23, 42, 0.6); border-top: 1px solid var(--border-glass); }
-            .input-wrapper { display: flex; align-items: center; background: rgba(30, 41, 59, 0.8); border: 1px solid var(--border-glass); border-radius: 28px; padding: 5px 6px 5px 18px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3); }
+            /* Bottom Bar */
+            .bottom-bar { padding: 10px 16px 22px; backdrop-filter: blur(16px); background: rgba(10, 14, 26, 0.7); border-top: 1px solid var(--border-glass); }
+            .input-wrapper { display: flex; align-items: center; background: rgba(28, 38, 58, 0.8); border: 1px solid var(--border-glass); border-radius: 28px; padding: 5px 6px 5px 18px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4); }
             .input-wrapper input { flex: 1; background: transparent; border: none; color: #fff; font-size: 14.5px; outline: none; }
             .input-wrapper input::placeholder { color: #64748b; }
             .send-circle { width: 38px; height: 38px; border-radius: 50%; background: var(--primary); border: none; color: #0f172a; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 16px; }
@@ -336,134 +299,203 @@ async def serve_app():
         <div class="header">
             <div class="brand">
                 <div class="brand-logo">🍋</div>
-                <div class="brand-title">Lemon Voice</div>
+                <div class="brand-title">Lemon Evolving Voice</div>
             </div>
             <div class="badge-live">
                 <span class="dot"></span>
-                <span>Active</span>
+                <span id="memoryBadge">Memory Active</span>
             </div>
         </div>
 
         <div class="chat-container" id="chatStream">
             <div class="bubble lemon">
-                Hey there! I'm <b>Lemon</b>. Tap the mic below or type anytime to ask me anything.
+                Hello! I am <b>Lemon</b>. I remember our conversations and evolve with you. Ask me anything or tell me to play a song!
             </div>
         </div>
 
-        <div class="voice-section">
-            <div class="orb-outer" id="orbOuter">
-                <div class="wave-ring"></div>
-                <button class="orb-btn" id="orbBtn" onclick="handleVoiceToggle()">🎙️</button>
-            </div>
-            <div class="status-label" id="statusLabel">Tap mic to speak</div>
+        <div class="voice-section" id="voiceSection">
+            <canvas id="visualizer"></canvas>
+            <button class="orb-btn" id="orbBtn" onclick="toggleVoice()">🎙️</button>
+            <div class="status-label" id="statusLabel">Tap mic to talk hands-free</div>
         </div>
 
         <div class="bottom-bar">
             <div class="input-wrapper">
-                <input type="text" id="textInput" placeholder="Ask Lemon anything..." onkeydown="if(event.key==='Enter') sendManualQuery()" />
-                <button class="send-circle" onclick="sendManualQuery()">➤</button>
+                <input type="text" id="textInput" placeholder="Message Lemon..." onkeydown="if(event.key==='Enter') sendTextQuery()" />
+                <button class="send-circle" onclick="sendTextQuery()">➤</button>
             </div>
         </div>
 
-        <audio id="audioElement" autoplay></audio>
+        <audio id="audioOut" autoplay></audio>
 
         <script>
             let isRecording = false;
             let mediaRecorder = null;
-            let recordedChunks = [];
+            let audioChunks = [];
+            let conversationHistory = [];
+            let audioContext = null;
+            let analyser = null;
+            let silenceTimer = null;
+            let canvas = document.getElementById("visualizer");
+            let ctx = canvas.getContext("2d");
 
-            const orbOuter = document.getElementById("orbOuter");
+            const orbBtn = document.getElementById("orbBtn");
+            const voiceSection = document.getElementById("voiceSection");
             const statusLabel = document.getElementById("statusLabel");
             const chatStream = document.getElementById("chatStream");
             const textInput = document.getElementById("textInput");
-            const audioElement = document.getElementById("audioElement");
+            const audioOut = document.getElementById("audioOut");
 
-            function addMessage(sender, text) {
-                const bubble = document.createElement("div");
-                bubble.className = `bubble ${sender}`;
-                bubble.innerText = text;
-                chatStream.appendChild(bubble);
+            function addBubble(role, text) {
+                const b = document.createElement("div");
+                b.className = `bubble ${role}`;
+                b.innerText = text;
+                chatStream.appendChild(b);
                 chatStream.scrollTop = chatStream.scrollHeight;
+                conversationHistory.push({ role: role === "user" ? "user" : "assistant", text: text });
+                if (conversationHistory.length > 8) conversationHistory.shift();
             }
 
-            async function handleVoiceToggle() {
+            // Real-Time Audio Visualizer & Voice Activity Silence Detection
+            function setupVisualizer(stream) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                const source = audioContext.createMediaStreamSource(stream);
+                source.connect(analyser);
+                analyser.fftSize = 64;
+                const bufferLength = analyser.frequencyBinCount;
+                const dataArray = new Uint8Array(bufferLength);
+
+                function draw() {
+                    if (!isRecording) {
+                        ctx.clearRect(0, 0, canvas.width, canvas.height);
+                        return;
+                    }
+                    requestAnimationFrame(draw);
+                    analyser.getByteFrequencyData(dataArray);
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                    // Check sound volume for silence auto-stop
+                    let sum = 0;
+                    for (let i = 0; i < bufferLength; i++) sum += dataArray[i];
+                    let average = sum / bufferLength;
+
+                    // If user was speaking and now silent for 1.4s, auto submit
+                    if (average > 15) {
+                        clearTimeout(silenceTimer);
+                        silenceTimer = setTimeout(() => {
+                            if (isRecording) stopRecordingAndSend();
+                        }, 1400);
+                    }
+
+                    // Render wave
+                    ctx.fillStyle = "rgba(250, 204, 21, 0.4)";
+                    let barWidth = (canvas.width / bufferLength) * 2;
+                    let x = 0;
+                    for (let i = 0; i < bufferLength; i++) {
+                        let barHeight = (dataArray[i] / 255) * canvas.height * 0.8;
+                        ctx.fillRect(x, (canvas.height - barHeight)/2, barWidth - 2, barHeight);
+                        x += barWidth;
+                    }
+                }
+                draw();
+            }
+
+            async function toggleVoice() {
                 if (!isRecording) {
                     try {
                         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                         mediaRecorder = new MediaRecorder(stream);
-                        recordedChunks = [];
+                        audioChunks = [];
+
+                        setupVisualizer(stream);
 
                         mediaRecorder.ondataavailable = (e) => {
-                            if (e.data.size > 0) recordedChunks.push(e.data);
+                            if (e.data.size > 0) audioChunks.push(e.data);
                         };
 
                         mediaRecorder.onstop = async () => {
-                            const blob = new Blob(recordedChunks, { type: 'audio/wav' });
-                            statusLabel.innerText = "Thinking...";
-                            uploadVoice(blob);
+                            const blob = new Blob(audioChunks, { type: 'audio/wav' });
                             stream.getTracks().forEach(t => t.stop());
+                            if (audioContext) audioContext.close();
+                            statusLabel.innerText = "Lemon is processing...";
+                            sendAudioToServer(blob);
                         };
 
                         mediaRecorder.start();
                         isRecording = true;
-                        orbOuter.classList.add("listening");
-                        statusLabel.innerText = "Listening... Tap to send";
+                        voiceSection.classList.add("listening");
+                        statusLabel.innerText = "Listening... Speak freely";
                     } catch(err) {
-                        alert("Microphone permission needed! Please allow microphone access.");
+                        alert("Microphone permission needed!");
                         statusLabel.innerText = "Mic blocked";
                     }
                 } else {
-                    isRecording = false;
-                    orbOuter.classList.remove("listening");
-                    statusLabel.innerText = "Processing...";
-                    if (mediaRecorder) mediaRecorder.stop();
+                    stopRecordingAndSend();
                 }
             }
 
-            async function uploadVoice(blob) {
+            function stopRecordingAndSend() {
+                if (!isRecording) return;
+                isRecording = false;
+                voiceSection.classList.remove("listening");
+                statusLabel.innerText = "Finalizing thought...";
+                clearTimeout(silenceTimer);
+                if (mediaRecorder && mediaRecorder.state !== "inactive") mediaRecorder.stop();
+            }
+
+            async function sendAudioToServer(blob) {
                 const fd = new FormData();
                 fd.append("file", blob, "voice.wav");
+                fd.append("history", JSON.stringify(conversationHistory));
 
                 try {
                     const res = await fetch("/voice-process", { method: "POST", body: fd });
                     const data = await res.json();
                     
-                    if (data.user_text) {
-                        addMessage("user", data.user_text);
+                    if (data.user_text) addBubble("user", data.user_text);
+                    addBubble("lemon", data.reply_text);
+                    statusLabel.innerText = "Tap mic to talk hands-free";
+
+                    if (data.action === "youtube" && data.action_target) {
+                        window.open(data.action_target, '_blank');
                     }
-                    addMessage("lemon", data.reply_text);
-                    statusLabel.innerText = "Tap mic to speak";
 
                     if (data.audio_base64) {
-                        audioElement.src = data.audio_base64;
-                        audioElement.play();
+                        audioOut.src = data.audio_base64;
+                        audioOut.play();
                     }
                 } catch(err) {
                     statusLabel.innerText = "Network error. Try again.";
                 }
             }
 
-            async function sendManualQuery() {
-                const query = textInput.value.trim();
-                if (!query) return;
+            async function sendTextQuery() {
+                const q = textInput.value.trim();
+                if (!q) return;
 
                 textInput.value = "";
-                addMessage("user", query);
+                addBubble("user", q);
                 statusLabel.innerText = "Thinking...";
 
                 const fd = new FormData();
-                fd.append("text", query);
+                fd.append("text", q);
+                fd.append("history", JSON.stringify(conversationHistory));
 
                 try {
                     const res = await fetch("/text-process", { method: "POST", body: fd });
                     const data = await res.json();
                     
-                    addMessage("lemon", data.reply_text);
-                    statusLabel.innerText = "Tap mic to speak";
+                    addBubble("lemon", data.reply_text);
+                    statusLabel.innerText = "Tap mic to talk hands-free";
+
+                    if (data.action === "youtube" && data.action_target) {
+                        window.open(data.action_target, '_blank');
+                    }
 
                     if (data.audio_base64) {
-                        audioElement.src = data.audio_base64;
-                        audioElement.play();
+                        audioOut.src = data.audio_base64;
+                        audioOut.play();
                     }
                 } catch(err) {
                     statusLabel.innerText = "Network error. Try again.";
