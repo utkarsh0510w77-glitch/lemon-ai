@@ -40,21 +40,22 @@ def ask_groq_llm(user_prompt: str) -> str:
                         "content": (
                             "You are Lemon, an intelligent and articulate AI voice assistant. "
                             "Thoroughly and completely explain your thoughts and answer the user's question without cutting off. "
-                            "Take as many words and sentences as necessary to fully conclude your views. "
-                            "Speak in a natural, flowing, conversational style. "
-                            "Do not use markdown formatting like tables, pipes (|), asterisks (*), or hashes (#) so your words can be read aloud cleanly."
+                            "Take as many words as necessary to fully finish your answer cleanly. "
+                            "Speak in clean, natural prose paragraphs. Do not leave random blank lines, bullet gaps, or markdown formatting."
                         )
                     },
                     {"role": "user", "content": user_prompt}
                 ],
                 model=m,
-                max_tokens=2048,  # Huge token limit so it NEVER runs out of words
+                max_tokens=2048,
                 temperature=0.6
             )
             if chat.choices and chat.choices[0].message.content:
                 reply = chat.choices[0].message.content.strip()
-                # Clean up any markdown characters that interfere with reading
-                clean = re.sub(r'[*#|_>`]', '', reply).strip()
+                # 1. Clean symbols
+                clean = re.sub(r'[*#|_>`]', '', reply)
+                # 2. Fix empty line leaks (replace 3+ newlines with single break)
+                clean = re.sub(r'\n{2,}', '\n\n', clean).strip()
                 return clean
         except Exception as e:
             print(f"Model {m} failed: {e}")
@@ -104,7 +105,6 @@ async def voice_process(file: UploadFile = File(...)):
 
     reply_text = process_query_text(user_text)
 
-    # Audio synthesis with no length limit
     reply_audio = "app_reply.mp3"
     tts = gTTS(text=reply_text, lang="en", slow=False)
     tts.save(reply_audio)
@@ -238,10 +238,11 @@ async def serve_app():
                 padding: 14px 18px;
                 border-radius: 18px;
                 font-size: 14.5px;
-                line-height: 1.6;
+                line-height: 1.55;
                 animation: fadeIn 0.3s ease;
-                white-space: pre-wrap;
-                word-wrap: break-word;
+                white-space: normal;           /* Fixes blank lines leak */
+                word-break: break-word;        /* Prevents text overflow */
+                overflow-wrap: anywhere;
             }
             @keyframes fadeIn {
                 from { opacity: 0; transform: translateY(8px); }
@@ -265,6 +266,29 @@ async def serve_app():
                 font-weight: 600;
                 border-bottom-right-radius: 4px;
                 box-shadow: 0 4px 14px var(--primary-glow);
+            }
+
+            .bubble.thinking {
+                align-self: flex-start;
+                background: rgba(30, 41, 59, 0.6);
+                border: 1px dashed rgba(250, 204, 21, 0.4);
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                padding: 12px 18px;
+            }
+            .thinking-dot {
+                width: 8px;
+                height: 8px;
+                background: #facc15;
+                border-radius: 50%;
+                animation: bounce 1.4s infinite ease-in-out both;
+            }
+            .thinking-dot:nth-child(1) { animation-delay: -0.32s; }
+            .thinking-dot:nth-child(2) { animation-delay: -0.16s; }
+            @keyframes bounce {
+                0%, 80%, 100% { transform: scale(0); opacity: 0.3; }
+                40% { transform: scale(1); opacity: 1; }
             }
 
             .voice-section {
@@ -319,6 +343,12 @@ async def serve_app():
                 animation: orbGlow 1.2s infinite alternate;
             }
 
+            .thinking-mode .orb-btn {
+                animation: spinPulse 1.5s infinite linear;
+                box-shadow: 0 0 35px rgba(56, 189, 248, 0.8);
+                background: linear-gradient(135deg, #38bdf8 0%, #0284c7 100%);
+            }
+
             @keyframes pulseRing {
                 0% { transform: scale(0.8); opacity: 0.9; }
                 100% { transform: scale(2.2); opacity: 0; }
@@ -327,12 +357,21 @@ async def serve_app():
                 0% { box-shadow: 0 0 20px var(--primary-glow); }
                 100% { box-shadow: 0 0 45px rgba(250, 204, 21, 0.9); }
             }
+            @keyframes spinPulse {
+                0% { transform: rotate(0deg) scale(0.98); }
+                50% { transform: rotate(180deg) scale(1.05); }
+                100% { transform: rotate(360deg) scale(0.98); }
+            }
 
             .status-label {
                 font-size: 13.5px;
-                font-weight: 500;
+                font-weight: 600;
                 color: var(--text-muted);
                 margin-top: 8px;
+                transition: color 0.2s;
+            }
+            .status-label.active-thinking {
+                color: #38bdf8;
             }
 
             .bottom-bar {
@@ -416,6 +455,7 @@ async def serve_app():
             let mediaRecorder = null;
             let recordedChunks = [];
             let isLemonSpeaking = false;
+            let currentThinkingBubble = null;
 
             const orbOuter = document.getElementById("orbOuter");
             const statusLabel = document.getElementById("statusLabel");
@@ -425,15 +465,52 @@ async def serve_app():
 
             audioElement.onplay = () => {
                 isLemonSpeaking = true;
+                setThinking(false);
                 statusLabel.innerText = "🔊 Lemon is speaking...";
             };
 
             audioElement.onended = () => {
                 isLemonSpeaking = false;
                 statusLabel.innerText = "Tap mic to speak";
+                statusLabel.classList.remove("active-thinking");
             };
 
+            function setThinking(active, text = "⚡ Lemon is thinking...") {
+                if (active) {
+                    orbOuter.classList.add("thinking-mode");
+                    statusLabel.classList.add("active-thinking");
+                    statusLabel.innerText = text;
+                    showThinkingBubble();
+                } else {
+                    orbOuter.classList.remove("thinking-mode");
+                    statusLabel.classList.remove("active-thinking");
+                    removeThinkingBubble();
+                }
+            }
+
+            function showThinkingBubble() {
+                if (currentThinkingBubble) return;
+                currentThinkingBubble = document.createElement("div");
+                currentThinkingBubble.className = "bubble thinking";
+                currentThinkingBubble.innerHTML = `
+                    <div class="thinking-dot"></div>
+                    <div class="thinking-dot"></div>
+                    <div class="thinking-dot"></div>
+                    <span style="font-size:12px; color:#94a3b8; margin-left:4px;">Thinking...</span>
+                `;
+                chatStream.appendChild(currentThinkingBubble);
+                chatStream.scrollTop = chatStream.scrollHeight;
+            }
+
+            function removeThinkingBubble() {
+                if (currentThinkingBubble) {
+                    currentThinkingBubble.remove();
+                    currentThinkingBubble = null;
+                }
+            }
+
             function addMessage(sender, text) {
+                removeThinkingBubble();
                 const bubble = document.createElement("div");
                 bubble.className = `bubble ${sender}`;
                 bubble.innerText = text;
@@ -459,7 +536,7 @@ async def serve_app():
 
                         mediaRecorder.onstop = async () => {
                             const blob = new Blob(recordedChunks, { type: 'audio/wav' });
-                            statusLabel.innerText = "Thinking...";
+                            setThinking(true, "⚡ Processing voice & thinking...");
                             uploadVoice(blob);
                             stream.getTracks().forEach(t => t.stop());
                         };
@@ -467,7 +544,7 @@ async def serve_app():
                         mediaRecorder.start();
                         isRecording = true;
                         orbOuter.classList.add("listening");
-                        statusLabel.innerText = "Listening... Tap to finish";
+                        statusLabel.innerText = "🔴 Listening... Tap to finish";
                     } catch(err) {
                         alert("Microphone permission needed! Please allow microphone access.");
                         statusLabel.innerText = "Mic blocked";
@@ -475,7 +552,7 @@ async def serve_app():
                 } else {
                     isRecording = false;
                     orbOuter.classList.remove("listening");
-                    statusLabel.innerText = "Processing...";
+                    setThinking(true, "⚡ Processing voice...");
                     if (mediaRecorder) mediaRecorder.stop();
                 }
             }
@@ -497,9 +574,11 @@ async def serve_app():
                         audioElement.src = data.audio_base64;
                         audioElement.play();
                     } else {
+                        setThinking(false);
                         statusLabel.innerText = "Tap mic to speak";
                     }
                 } catch(err) {
+                    setThinking(false);
                     statusLabel.innerText = "Network error. Try again.";
                 }
             }
@@ -510,7 +589,7 @@ async def serve_app():
 
                 textInput.value = "";
                 addMessage("user", query);
-                statusLabel.innerText = "Thinking...";
+                setThinking(true, "⚡ Lemon is thinking...");
 
                 const fd = new FormData();
                 fd.append("text", query);
@@ -525,9 +604,11 @@ async def serve_app():
                         audioElement.src = data.audio_base64;
                         audioElement.play();
                     } else {
+                        setThinking(false);
                         statusLabel.innerText = "Tap mic to speak";
                     }
                 } catch(err) {
+                    setThinking(false);
                     statusLabel.innerText = "Network error. Try again.";
                 }
             }
