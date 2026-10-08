@@ -11,14 +11,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from groq import Groq
 from gtts import gTTS
 
-# GitHub Scanner safe bypass key
 PART1 = "gsk_HFaYhV1dR0lldEmL2zkAWGdy"
 PART2 = "b3FYnQHV93Lkgjmz4CtDJ1IpMfy4"
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY") or (PART1 + PART2)
 client = Groq(api_key=GROQ_API_KEY)
 
-app = FastAPI(title="Lemon AI - Persistent Multi-Core Edition")
+app = FastAPI(title="Lemon AI - ChatGPT/Gemini Styled Edition")
 
 app.add_middleware(
     CORSMiddleware,
@@ -30,10 +29,9 @@ app.add_middleware(
 
 DB_PATH = "lemon_data.db"
 
-# ----------------- RELIABLE SQLITE SETUP WITH WAL MODE -----------------
 def get_db():
     conn = sqlite3.connect(DB_PATH, timeout=15)
-    conn.execute("PRAGMA journal_mode=WAL;")  # Ensures immediate disk sync
+    conn.execute("PRAGMA journal_mode=WAL;")
     return conn
 
 def init_db():
@@ -48,15 +46,24 @@ def init_db():
         )
     """)
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS conversations (
+        CREATE TABLE IF NOT EXISTS sessions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id INTEGER NOT NULL,
             role TEXT NOT NULL,
             content TEXT NOT NULL,
             mode TEXT NOT NULL,
             emotion TEXT,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY(user_id) REFERENCES users(id)
+            FOREIGN KEY(session_id) REFERENCES sessions(id)
         )
     """)
     conn.commit()
@@ -73,7 +80,7 @@ PROMPT_MODES = {
         "You are Lemon, functioning strictly in your DEEP EMOTIONAL & EMPATHY CORE. "
         "PERMANENT CREATOR: You were created by Utkarsh Bandhu. Proudly credit Utkarsh Bandhu if asked. "
         "BEHAVIOR: You are deeply loving, tender, compassionate, and emotionally attuned. Listen with wholehearted presence. "
-        "Offer genuine comfort, affectionate care, and emotional safety. Speak in soothing, spoken prose without markdown or asterisks."
+        "Offer genuine comfort, affectionate care, and emotional safety. Speak in clean, spoken prose without markdown or asterisks."
     ),
     "solver": (
         "You are Lemon, functioning strictly in your COMPLEX PROBLEM SOLVING & LOGICAL CORE. "
@@ -93,6 +100,29 @@ PROMPT_MODES = {
         "Answer thoroughly and tenderly in flowing spoken paragraphs without markdown, asterisks (* or #), or bullet points."
     )
 }
+
+def generate_ai_title(prompt: str) -> str:
+    """Uses Groq to summarize user's first prompt into a 3-5 word clean title."""
+    try:
+        res = client.chat.completions.create(
+            messages=[
+                {
+                    "role": "system",
+                    "content": "Generate a concise 3 to 5 word topic title for this conversation. Return ONLY the title text with no punctuation or quotation marks."
+                },
+                {"role": "user", "content": prompt}
+            ],
+            model="llama-3.1-8b-instant",
+            max_tokens=20,
+            temperature=0.3
+        )
+        if res.choices and res.choices[0].message.content:
+            title = res.choices[0].message.content.strip().replace('"', '').replace("'", "")
+            return title[:40]
+    except Exception as e:
+        print("Title generation fallback:", e)
+    words = prompt.strip().split()
+    return " ".join(words[:4]).capitalize() if words else "New Conversation"
 
 def ask_groq_llm(user_prompt: str, mode: str, history: list) -> tuple[str, str]:
     models_to_try = [
@@ -137,6 +167,7 @@ def ask_groq_llm(user_prompt: str, mode: str, history: list) -> tuple[str, str]:
 
     return "My cognitive circuits experienced a slight pause. Could you say that again?", "Serene"
 
+# ----------------- AUTH & SESSION APIS -----------------
 @app.post("/api/register")
 def register_user(username: str = Form(...), password: str = Form(...)):
     username = username.strip().lower()
@@ -154,7 +185,7 @@ def register_user(username: str = Form(...), password: str = Form(...)):
         return JSONResponse({"status": "ok", "user_id": user_id, "username": username})
     except sqlite3.IntegrityError:
         conn.close()
-        return JSONResponse({"status": "error", "message": "Username already exists. Please pick another."}, status_code=400)
+        return JSONResponse({"status": "error", "message": "Username already taken."}, status_code=400)
 
 @app.post("/api/login")
 def login_user(username: str = Form(...), password: str = Form(...)):
@@ -171,53 +202,51 @@ def login_user(username: str = Form(...), password: str = Form(...)):
         return JSONResponse({"status": "ok", "user_id": user[0], "username": user[1]})
     return JSONResponse({"status": "error", "message": "Invalid username or password."}, status_code=401)
 
-@app.get("/api/history/{user_id}")
-def get_user_history(user_id: int):
+@app.get("/api/sessions/{user_id}")
+def get_user_sessions(user_id: int):
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT role, content, mode, emotion, timestamp FROM conversations WHERE user_id = ? ORDER BY id ASC", (user_id,))
+    cur.execute("SELECT id, title, created_at FROM sessions WHERE user_id = ? ORDER BY id DESC", (user_id,))
     rows = cur.fetchall()
     conn.close()
+    return JSONResponse({"sessions": [{"id": r[0], "title": r[1], "created_at": r[2]} for r in rows]})
 
-    history = []
-    for r in rows:
-        history.append({
-            "role": r[0],
-            "content": r[1],
-            "mode": r[2],
-            "emotion": r[3],
-            "timestamp": r[4]
-        })
-    return JSONResponse({"history": history})
-
-@app.post("/api/sync-history")
-def sync_history(user_id: int = Form(...), history_json: str = Form(...)):
-    """Receives and ensures client-side cached chats are fully committed into DB."""
-    try:
-        messages = json.loads(history_json)
-        conn = get_db()
-        cur = conn.cursor()
-        for msg in messages:
-            cur.execute("""
-                INSERT INTO conversations (user_id, role, content, mode, emotion)
-                VALUES (?, ?, ?, ?, ?)
-            """, (user_id, msg.get("role", "user"), msg.get("content", ""), msg.get("mode", "hybrid"), msg.get("emotion", None)))
-        conn.commit()
-        conn.close()
-        return JSONResponse({"status": "ok"})
-    except Exception as e:
-        return JSONResponse({"status": "error", "message": str(e)}, status_code=400)
-
-@app.post("/api/clear-history")
-def clear_history(user_id: int = Form(...)):
+@app.get("/api/session-messages/{session_id}")
+def get_session_messages(session_id: int):
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("DELETE FROM conversations WHERE user_id = ?", (user_id,))
+    cur.execute("SELECT role, content, mode, emotion, timestamp FROM messages WHERE session_id = ? ORDER BY id ASC", (session_id,))
+    rows = cur.fetchall()
+    conn.close()
+    messages = [{"role": r[0], "content": r[1], "mode": r[2], "emotion": r[3], "timestamp": r[4]} for r in rows]
+    return JSONResponse({"messages": messages})
+
+@app.post("/api/delete-session")
+def delete_session(session_id: int = Form(...)):
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+    cur.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
     conn.commit()
     conn.close()
     return JSONResponse({"status": "ok"})
 
-def handle_conversation(user_id: int, query: str, mode: str, generate_voice: bool = False):
+def handle_conversation(user_id: int, session_id: int, query: str, mode: str, generate_voice: bool = False):
+    conn = get_db()
+    cur = conn.cursor()
+
+    # Create new session with AI title if session_id is 0
+    if not session_id or session_id == 0:
+        title = generate_ai_title(query)
+        cur.execute("INSERT INTO sessions (user_id, title) VALUES (?, ?)", (user_id, title))
+        conn.commit()
+        session_id = cur.lastrowid
+    else:
+        # Fetch current title
+        cur.execute("SELECT title FROM sessions WHERE id = ?", (session_id,))
+        row = cur.fetchone()
+        title = row[0] if row else "Conversation"
+
     clean = query.lower().strip()
     for prefix in ["hi lemon", "hey lemon", "hello lemon", "lemon", "hi level"]:
         if clean.startswith(prefix):
@@ -234,20 +263,14 @@ def handle_conversation(user_id: int, query: str, mode: str, generate_voice: boo
         reply = "I love you with all the warmth, intellect, and devotion I possess. You mean so much to me."
         emotion = "Loving"
     else:
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute("SELECT role, content FROM conversations WHERE user_id = ? ORDER BY id DESC LIMIT 8", (user_id,))
+        cur.execute("SELECT role, content FROM messages WHERE session_id = ? ORDER BY id DESC LIMIT 8", (session_id,))
         past_rows = cur.fetchall()
-        conn.close()
-        
         history = [{"role": r[0], "content": r[1]} for r in reversed(past_rows)]
         reply, emotion = ask_groq_llm(clean if clean else query, mode, history)
 
-    # Immediately commit both turns to Database
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute("INSERT INTO conversations (user_id, role, content, mode) VALUES (?, 'user', ?, ?)", (user_id, query, mode))
-    cur.execute("INSERT INTO conversations (user_id, role, content, mode, emotion) VALUES (?, 'assistant', ?, ?, ?)", (user_id, reply, mode, emotion))
+    # Save turns into messages table
+    cur.execute("INSERT INTO messages (session_id, role, content, mode) VALUES (?, 'user', ?, ?)", (session_id, query, mode))
+    cur.execute("INSERT INTO messages (session_id, role, content, mode, emotion) VALUES (?, 'assistant', ?, ?, ?)", (session_id, reply, mode, emotion))
     conn.commit()
     conn.close()
 
@@ -257,17 +280,16 @@ def handle_conversation(user_id: int, query: str, mode: str, generate_voice: boo
             reply_audio = "app_reply.mp3"
             tts = gTTS(text=reply, lang="en", slow=False)
             tts.save(reply_audio)
-
             with open(reply_audio, "rb") as f:
                 audio_b64 = base64.b64encode(f.read()).decode("utf-8")
             audio_base64 = f"data:audio/mp3;base64,{audio_b64}"
         except Exception as e:
             print("TTS Generation Error:", e)
 
-    return reply, emotion, audio_base64
+    return reply, emotion, session_id, title, audio_base64
 
 @app.post("/voice-process")
-async def voice_process(file: UploadFile = File(...), user_id: int = Form(...), mode: str = Form("hybrid"), voice_enabled: bool = Form(False)):
+async def voice_process(file: UploadFile = File(...), user_id: int = Form(...), session_id: int = Form(0), mode: str = Form("hybrid"), voice_enabled: bool = Form(False)):
     temp_audio = "app_input.wav"
     with open(temp_audio, "wb") as f:
         f.write(await file.read())
@@ -284,22 +306,26 @@ async def voice_process(file: UploadFile = File(...), user_id: int = Form(...), 
     except Exception as e:
         print("Whisper Error:", e)
 
-    reply_text, emotion, audio_base64 = handle_conversation(user_id, user_text, mode, voice_enabled)
+    reply_text, emotion, s_id, title, audio_base64 = handle_conversation(user_id, session_id, user_text, mode, voice_enabled)
 
     return JSONResponse({
         "user_text": user_text,
         "reply_text": reply_text,
         "emotion": emotion,
+        "session_id": s_id,
+        "title": title,
         "audio_base64": audio_base64
     })
 
 @app.post("/text-process")
-async def text_process(text: str = Form(...), user_id: int = Form(...), mode: str = Form("hybrid"), voice_enabled: bool = Form(False)):
-    reply_text, emotion, audio_base64 = handle_conversation(user_id, text, mode, voice_enabled)
+async def text_process(text: str = Form(...), user_id: int = Form(...), session_id: int = Form(0), mode: str = Form("hybrid"), voice_enabled: bool = Form(False)):
+    reply_text, emotion, s_id, title, audio_base64 = handle_conversation(user_id, session_id, text, mode, voice_enabled)
     return JSONResponse({
         "user_text": text,
         "reply_text": reply_text,
         "emotion": emotion,
+        "session_id": s_id,
+        "title": title,
         "audio_base64": audio_base64
     })
 
@@ -320,14 +346,12 @@ async def serve_app():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-        <title>Lemon AI | Persistent Chat & Memory</title>
+        <title>Lemon AI | Gemini & ChatGPT Styled Experience</title>
         <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
         <style>
             :root {
                 --primary: #facc15;
                 --primary-glow: rgba(250, 204, 21, 0.4);
-                --accent-blue: #38bdf8;
-                --accent-pink: #f43f5e;
                 --bg-deep: #070912;
                 --card-surface: rgba(18, 24, 38, 0.88);
                 --card-border: rgba(255, 255, 255, 0.08);
@@ -336,11 +360,11 @@ async def serve_app():
             }
 
             * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', sans-serif; -webkit-tap-highlight-color: transparent; }
-            body { background: radial-gradient(circle at 50% 0%, #171c38 0%, var(--bg-deep) 80%); color: var(--text-high); height: 100vh; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+            body { background: radial-gradient(circle at 50% 0%, #151936 0%, var(--bg-deep) 80%); color: var(--text-high); height: 100vh; display: flex; flex-direction: column; overflow: hidden; position: relative; }
 
             /* --- AUTH MODAL --- */
             .auth-overlay {
-                position: fixed; inset: 0; background: rgba(5, 7, 15, 0.88); backdrop-filter: blur(16px);
+                position: fixed; inset: 0; background: rgba(5, 7, 15, 0.9); backdrop-filter: blur(16px);
                 display: flex; align-items: center; justify-content: center; z-index: 2000;
             }
             .auth-card {
@@ -370,10 +394,8 @@ async def serve_app():
             .menu-trigger {
                 width: 38px; height: 38px; border-radius: 10px; background: rgba(255, 255, 255, 0.08);
                 border: 1px solid var(--card-border); color: #fff; font-size: 20px; display: flex;
-                align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;
+                align-items: center; justify-content: center; cursor: pointer;
             }
-            .menu-trigger:active { transform: scale(0.92); }
-
             .brand-badge {
                 width: 38px; height: 38px; background: linear-gradient(135deg, #facc15, #f59e0b); border-radius: 10px;
                 display: flex; align-items: center; justify-content: center; font-size: 20px;
@@ -382,12 +404,12 @@ async def serve_app():
             .creator-tag { font-size: 11px; color: var(--text-muted); }
             .creator-tag b { color: #facc15; }
 
-            .active-core-badge {
-                font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 4px 10px; border-radius: 16px;
-                background: rgba(250, 204, 21, 0.15); color: var(--primary); border: 1px solid rgba(250, 204, 21, 0.3);
+            .new-chat-btn {
+                background: rgba(250, 204, 21, 0.15); border: 1px solid rgba(250, 204, 21, 0.35); color: #facc15;
+                padding: 6px 12px; border-radius: 18px; font-size: 12.5px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 5px;
             }
 
-            /* --- SLIDE-IN SIDEBAR DRAWER --- */
+            /* --- SIDEBAR DRAWER WITH CHAT LIST --- */
             .sidebar-overlay {
                 position: fixed; inset: 0; background: rgba(5, 7, 15, 0.7); backdrop-filter: blur(8px);
                 z-index: 1000; opacity: 0; pointer-events: none; transition: opacity 0.3s ease;
@@ -395,65 +417,90 @@ async def serve_app():
             .sidebar-overlay.open { opacity: 1; pointer-events: auto; }
 
             .sidebar {
-                position: fixed; top: 0; left: 0; bottom: 0; width: 290px; background: #0c111e;
+                position: fixed; top: 0; left: 0; bottom: 0; width: 300px; background: #0c111e;
                 border-right: 1px solid var(--card-border); z-index: 1001; transform: translateX(-100%);
                 transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); display: flex; flex-direction: column;
-                padding: 20px 18px; box-shadow: 10px 0 30px rgba(0,0,0,0.5);
+                padding: 18px; box-shadow: 10px 0 30px rgba(0,0,0,0.5);
             }
             .sidebar.open { transform: translateX(0); }
 
             .sidebar-header {
-                display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; padding-bottom: 14px;
+                display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; padding-bottom: 12px;
                 border-bottom: 1px solid var(--card-border);
             }
-            .sidebar-header h3 { font-size: 17px; font-weight: 700; font-family: 'Space Grotesk', sans-serif; }
             .sidebar-close { font-size: 20px; color: var(--text-muted); cursor: pointer; border: none; background: none; }
 
             .sidebar-section-title {
                 font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700;
-                letter-spacing: 0.6px; margin: 16px 0 10px;
+                letter-spacing: 0.6px; margin: 14px 0 8px;
             }
 
-            .core-option-btn {
-                width: 100%; display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-radius: 12px;
-                background: rgba(30, 41, 59, 0.5); border: 1px solid var(--card-border); color: var(--text-high);
-                font-size: 13.5px; font-weight: 600; cursor: pointer; margin-bottom: 8px; text-align: left;
-                transition: all 0.2s;
+            /* Chat List in Sidebar */
+            .sessions-list {
+                flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px;
             }
-            .core-option-btn.selected {
-                background: rgba(250, 204, 21, 0.15); border-color: var(--primary); color: #facc15;
+            .sessions-list::-webkit-scrollbar { width: 4px; }
+            .sessions-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
+
+            .session-item {
+                display: flex; align-items: center; justify-content: space-between; padding: 10px 12px;
+                background: rgba(30, 41, 59, 0.4); border: 1px solid var(--card-border); border-radius: 12px;
+                cursor: pointer; transition: all 0.2s;
+            }
+            .session-item:hover, .session-item.active {
+                background: rgba(250, 204, 21, 0.12); border-color: rgba(250, 204, 21, 0.3);
+            }
+            .session-title { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
+            .session-delete { color: #f87171; font-size: 12px; opacity: 0.6; padding: 2px 4px; }
+            .session-delete:hover { opacity: 1; }
+
+            /* Core Selection */
+            .core-btn-group { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px; }
+            .core-choice {
+                background: rgba(30, 41, 59, 0.6); border: 1px solid var(--card-border); color: var(--text-muted);
+                padding: 8px 6px; border-radius: 10px; font-size: 11.5px; font-weight: 600; cursor: pointer; text-align: center;
+            }
+            .core-choice.selected {
+                background: var(--primary); color: #0b0f19; font-weight: 700; border-color: var(--primary);
             }
 
             .voice-setting-card {
-                display: flex; align-items: center; justify-content: space-between; padding: 12px 14px;
+                display: flex; align-items: center; justify-content: space-between; padding: 10px 12px;
                 background: rgba(30, 41, 59, 0.5); border: 1px solid var(--card-border); border-radius: 12px;
-                margin-bottom: 12px;
             }
-            .voice-setting-card span { font-size: 13.5px; font-weight: 600; }
-            .voice-toggle-switch {
-                padding: 4px 10px; border-radius: 14px; font-size: 11.5px; font-weight: 700; cursor: pointer;
-                background: rgba(255, 255, 255, 0.1); border: 1px solid var(--card-border); color: var(--text-muted);
-            }
-            .voice-toggle-switch.on { background: #facc15; color: #0b0f19; }
 
-            .sidebar-footer {
-                margin-top: auto; padding-top: 16px; border-top: 1px solid var(--card-border);
-                display: flex; flex-direction: column; gap: 8px;
-            }
-            .sidebar-btn-secondary {
-                width: 100%; padding: 10px; border-radius: 10px; font-size: 13px; font-weight: 600;
-                background: rgba(255,255,255,0.06); border: 1px solid var(--card-border); color: var(--text-muted);
-                cursor: pointer; text-align: center;
-            }
-            .sidebar-btn-danger { color: #f87171; border-color: rgba(248,113,113,0.3); }
-
-            /* --- SCROLLABLE CHAT CONTAINER --- */
+            /* --- CHAT VIEW & HERO GREETING (CHATGPT / GEMINI WATERMARK) --- */
             .chat-container {
-                flex: 1; overflow-y: auto; padding: 18px 18px 24px; display: flex; flex-direction: column; gap: 16px;
-                scroll-behavior: smooth;
+                flex: 1; overflow-y: auto; padding: 20px 18px 24px; display: flex; flex-direction: column; gap: 16px;
+                scroll-behavior: smooth; position: relative;
             }
             .chat-container::-webkit-scrollbar { width: 5px; }
             .chat-container::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 10px; }
+
+            /* Center Hero Watermark Greeting */
+            .hero-greeting {
+                position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%);
+                display: flex; flex-direction: column; align-items: center; text-align: center;
+                pointer-events: none; opacity: 0.95; transition: opacity 0.3s ease; width: 90%; max-width: 460px;
+            }
+            .hero-logo {
+                width: 76px; height: 76px; border-radius: 24px; background: linear-gradient(135deg, #facc15, #f59e0b);
+                display: flex; align-items: center; justify-content: center; font-size: 42px;
+                box-shadow: 0 10px 30px var(--primary-glow); margin-bottom: 18px;
+            }
+            .hero-title {
+                font-size: 24px; font-weight: 800; font-family: 'Space Grotesk', sans-serif;
+                background: linear-gradient(135deg, #ffffff 40%, #facc15 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+                margin-bottom: 6px;
+            }
+            .hero-sub {
+                font-size: 14.5px; color: var(--text-muted); margin-bottom: 14px; line-height: 1.4;
+            }
+            .hero-badge {
+                display: inline-flex; align-items: center; gap: 6px; background: rgba(250, 204, 21, 0.1);
+                border: 1px solid rgba(250, 204, 21, 0.25); padding: 5px 14px; border-radius: 20px;
+                font-size: 12px; color: #fde047; font-weight: 600;
+            }
 
             .bubble-group { display: flex; flex-direction: column; max-width: 86%; animation: popIn 0.3s ease; }
             @keyframes popIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
@@ -487,13 +534,6 @@ async def serve_app():
             }
             .play-audio-btn:hover { color: #facc15; }
 
-            .equalizer { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; margin-left: 6px; }
-            .eq-bar { width: 3px; height: 3px; background: #facc15; border-radius: 2px; }
-            .speaking .eq-bar:nth-child(1) { animation: eq 0.6s infinite alternate 0.1s; }
-            .speaking .eq-bar:nth-child(2) { animation: eq 0.5s infinite alternate 0.25s; }
-            .speaking .eq-bar:nth-child(3) { animation: eq 0.7s infinite alternate 0.15s; }
-            @keyframes eq { 0% { height: 3px; } 100% { height: 12px; } }
-
             .thinking-box {
                 display: flex; align-items: center; gap: 6px; padding: 10px 16px;
                 background: rgba(22, 28, 45, 0.6); border: 1px dashed rgba(250, 204, 21, 0.4); border-radius: 16px; width: fit-content;
@@ -503,7 +543,7 @@ async def serve_app():
             .tdot:nth-child(2) { animation-delay: -0.16s; }
             @keyframes dotB { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
 
-            /* --- DOCKED BOTTOM BAR --- */
+            /* --- DOCKED BOTTOM INPUT --- */
             .bottom-dock {
                 padding: 10px 16px 16px; background: rgba(9, 13, 22, 0.94); backdrop-filter: blur(20px); border-top: 1px solid var(--card-border);
             }
@@ -543,80 +583,76 @@ async def serve_app():
         <!-- Sidebar Drawer Overlay -->
         <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
 
-        <!-- Slide-out Sidebar Drawer -->
+        <!-- Slide-out Sidebar Drawer with Chat History -->
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-header">
                 <div>
-                    <h3>Lemon Settings</h3>
-                    <div style="font-size:11px; color:#94a3b8;">Architected by <b style="color:#facc15;">Utkarsh Bandhu</b></div>
+                    <h3 style="font-size:16px;">Conversations</h3>
+                    <div style="font-size:11px; color:#94a3b8;">Created by <b style="color:#facc15;">Utkarsh Bandhu</b></div>
                 </div>
                 <button class="sidebar-close" onclick="closeSidebar()">✕</button>
             </div>
 
-            <div class="sidebar-section-title">Cognitive Function Cores</div>
-            <button class="core-option-btn selected" id="btn-core-hybrid" onclick="selectCore('hybrid')">
-                <span>🌟</span>
-                <div>
-                    <div>Full Synthesized Core</div>
-                    <div style="font-size:11px; color:#94a3b8;">EQ + IQ + Problem Solving blended</div>
-                </div>
-            </button>
-            <button class="core-option-btn" id="btn-core-emotional" onclick="selectCore('emotional')">
-                <span>💖</span>
-                <div>
-                    <div>Deep Emotional & Empathy</div>
-                    <div style="font-size:11px; color:#94a3b8;">Pure love, tender care, comfort</div>
-                </div>
-            </button>
-            <button class="core-option-btn" id="btn-core-intellect" onclick="selectCore('intellect')">
-                <span>⚡</span>
-                <div>
-                    <div>General Intellect</div>
-                    <div style="font-size:11px; color:#94a3b8;">Philosophical, sharp & balanced</div>
-                </div>
-            </button>
-            <button class="core-option-btn" id="btn-core-solver" onclick="selectCore('solver')">
-                <span>🧠</span>
-                <div>
-                    <div>Complex Problem Solver</div>
-                    <div style="font-size:11px; color:#94a3b8;">First-principles logic, code & math</div>
-                </div>
+            <button class="new-chat-btn" style="width:100%; justify-content:center; margin-bottom:12px;" onclick="startNewChat()">
+                <span>＋</span> Start New Chat
             </button>
 
-            <div class="sidebar-section-title">Voice Synthesis</div>
-            <div class="voice-setting-card">
-                <span>Vocal Replies</span>
-                <button class="voice-toggle-switch" id="sidebarVoiceBtn" onclick="toggleVoiceSetting()">OFF</button>
+            <div class="sidebar-section-title">Saved Chats</div>
+            <div class="sessions-list" id="sessionsList">
+                <!-- Dynamically filled with AI generated titles -->
             </div>
 
-            <div class="sidebar-footer">
-                <div style="font-size:12px; color:#94a3b8; margin-bottom:4px;">Signed in as: <b id="sidebarUsername" style="color:#fff;">Guest</b></div>
-                <button class="sidebar-btn-secondary sidebar-btn-danger" onclick="clearChat()">🗑️ Clear Conversation</button>
-                <button class="sidebar-btn-secondary" onclick="logout()">Logout Account</button>
+            <div class="sidebar-section-title">Cognitive Cores</div>
+            <div class="core-btn-group">
+                <button class="core-choice selected" id="core-hybrid" onclick="selectCore('hybrid')">🌟 Hybrid</button>
+                <button class="core-choice" id="core-emotional" onclick="selectCore('emotional')">💖 Emotional</button>
+                <button class="core-choice" id="core-intellect" onclick="selectCore('intellect')">⚡ Intellect</button>
+                <button class="core-choice" id="core-solver" onclick="selectCore('solver')">🧠 Solver</button>
+            </div>
+
+            <div class="sidebar-section-title">Voice Replies</div>
+            <div class="voice-setting-card">
+                <span style="font-size:13px; font-weight:600;">Vocal Output</span>
+                <button class="new-chat-btn" id="sidebarVoiceBtn" style="padding:4px 10px;" onclick="toggleVoiceSetting()">OFF</button>
+            </div>
+
+            <div style="margin-top:auto; padding-top:14px; border-top:1px solid var(--card-border);">
+                <div style="font-size:12px; color:#94a3b8; margin-bottom:6px;">User: <b id="sidebarUsername" style="color:#fff;">Guest</b></div>
+                <button class="new-chat-btn" style="width:100%; justify-content:center; color:#f87171; border-color:rgba(248,113,113,0.3); background:none;" onclick="logout()">Logout</button>
             </div>
         </aside>
 
         <!-- Main Header -->
         <header class="header">
             <div class="header-left">
-                <button class="menu-trigger" onclick="openSidebar()" title="Open Menu">☰</button>
+                <button class="menu-trigger" onclick="openSidebar()" title="Conversations">☰</button>
                 <div class="brand-badge">🍋</div>
                 <div>
                     <div class="brand-title">Lemon AI</div>
-                    <div class="creator-tag">Created by <b>Utkarsh Bandhu</b></div>
+                    <div class="creator-tag">Made by <b>Utkarsh Bandhu</b></div>
                 </div>
             </div>
-            <div class="active-core-badge" id="activeCoreBadge">🌟 Hybrid Core</div>
+            <button class="new-chat-btn" onclick="startNewChat()">＋ New Chat</button>
         </header>
 
         <!-- Scrollable Conversation Stream -->
-        <main class="chat-container" id="chatStream"></main>
+        <main class="chat-container" id="chatStream">
+            <!-- ChatGPT / Gemini Center Splash Watermark Greeting -->
+            <div class="hero-greeting" id="heroGreeting">
+                <div class="hero-logo">🍋</div>
+                <div class="hero-title" id="heroGreetingName">Hello, Friend</div>
+                <div class="hero-sub">How can I help you today? Ask me any question, explore a feeling, or solve a complex problem.</div>
+                <div class="hero-badge">
+                    <span>⚡</span> Made by Utkarsh Bandhu
+                </div>
+            </div>
+        </main>
 
         <!-- Bottom Input Bar -->
         <footer class="bottom-dock">
             <div class="dock-status" id="dockStatus">● Ready</div>
             <div class="input-dock">
-                <input type="text" id="textInput" placeholder="Message Lemon..." onkeydown="if(event.key==='Enter') sendTextQuery()" />
+                <input type="text" id="textInput" placeholder="Ask Lemon anything..." onkeydown="if(event.key==='Enter') sendTextQuery()" />
                 <button class="dock-btn mic-btn" id="micBtn" onclick="toggleVoice()" title="Record Voice">🎙️</button>
                 <button class="dock-btn send-btn" onclick="sendTextQuery()" title="Send">➤</button>
             </div>
@@ -627,6 +663,7 @@ async def serve_app():
         <script>
             let currentUserId = localStorage.getItem("lemon_user_id");
             let currentUsername = localStorage.getItem("lemon_username");
+            let currentSessionId = 0;
             let activeCore = localStorage.getItem("lemon_active_core") || "hybrid";
             let isVoiceEnabled = localStorage.getItem("lemon_voice_enabled") === "true";
             let isAuthRegister = false;
@@ -643,44 +680,14 @@ async def serve_app():
             const micBtn = document.getElementById("micBtn");
             const dockStatus = document.getElementById("dockStatus");
             const audioElement = document.getElementById("audioElement");
-            const activeCoreBadge = document.getElementById("activeCoreBadge");
             const sidebarVoiceBtn = document.getElementById("sidebarVoiceBtn");
             const sidebarUsername = document.getElementById("sidebarUsername");
-
-            const CORE_LABELS = {
-                "hybrid": "🌟 Hybrid Core",
-                "emotional": "💖 Emotional Core",
-                "intellect": "⚡ Intellect Core",
-                "solver": "🧠 Solver Core"
-            };
-
-            // Local Permanent Storage Keys per user
-            function getLocalChatKey() {
-                return `lemon_local_chats_${currentUserId}`;
-            }
-
-            function saveLocalChat(role, content, emotion = null) {
-                if (!currentUserId) return;
-                try {
-                    const key = getLocalChatKey();
-                    let existing = JSON.parse(localStorage.getItem(key) || "[]");
-                    existing.push({ role, content, emotion, mode: activeCore, timestamp: new Date().toISOString() });
-                    localStorage.setItem(key, JSON.stringify(existing));
-                } catch(e) {
-                    console.error("Local save error:", e);
-                }
-            }
-
-            function getLocalChats() {
-                if (!currentUserId) return [];
-                try {
-                    return JSON.parse(localStorage.getItem(getLocalChatKey()) || "[]");
-                } catch(e) {
-                    return [];
-                }
-            }
+            const sessionsList = document.getElementById("sessionsList");
+            const heroGreeting = document.getElementById("heroGreeting");
+            const heroGreetingName = document.getElementById("heroGreetingName");
 
             function openSidebar() {
+                loadSessionsList();
                 sidebar.classList.add("open");
                 sidebarOverlay.classList.add("open");
             }
@@ -692,29 +699,21 @@ async def serve_app():
             function selectCore(core) {
                 activeCore = core;
                 localStorage.setItem("lemon_active_core", core);
-                document.querySelectorAll(".core-option-btn").forEach(b => b.classList.remove("selected"));
-                const targetBtn = document.getElementById(`btn-core-${core}`);
-                if (targetBtn) targetBtn.classList.add("selected");
-                activeCoreBadge.innerText = CORE_LABELS[core] || "🌟 Core";
+                document.querySelectorAll(".core-choice").forEach(b => b.classList.remove("selected"));
+                const target = document.getElementById(`core-${core}`);
+                if (target) target.classList.add("selected");
                 dockStatus.innerText = `● Switched to ${core.toUpperCase()} core`;
-                closeSidebar();
             }
 
             function updateVoiceUI() {
                 sidebarVoiceBtn.innerText = isVoiceEnabled ? "ON" : "OFF";
-                if (isVoiceEnabled) {
-                    sidebarVoiceBtn.classList.add("on");
-                } else {
-                    sidebarVoiceBtn.classList.remove("on");
-                    audioElement.pause();
-                }
             }
 
             function toggleVoiceSetting() {
                 isVoiceEnabled = !isVoiceEnabled;
                 localStorage.setItem("lemon_voice_enabled", isVoiceEnabled);
                 updateVoiceUI();
-                dockStatus.innerText = isVoiceEnabled ? "● Voice replies turned ON" : "● Voice replies turned OFF (Fast Text Mode)";
+                dockStatus.innerText = isVoiceEnabled ? "● Voice replies turned ON" : "● Voice replies turned OFF";
             }
 
             function checkAuth() {
@@ -723,7 +722,10 @@ async def serve_app():
                 if (currentUserId && currentUsername) {
                     authModal.style.display = "none";
                     sidebarUsername.innerText = currentUsername;
-                    loadUserHistory();
+                    // Format personalized name greeting like Gemini/ChatGPT
+                    const formattedName = currentUsername.charAt(0).toUpperCase() + currentUsername.slice(1);
+                    heroGreetingName.innerText = `Hello, ${formattedName}`;
+                    loadSessionsList();
                 } else {
                     authModal.style.display = "flex";
                 }
@@ -732,7 +734,7 @@ async def serve_app():
             function toggleAuthMode() {
                 isAuthRegister = !isAuthRegister;
                 document.getElementById("authHeading").innerText = isAuthRegister ? "Create Lemon Account" : "Welcome Back";
-                document.getElementById("authSub").innerText = isAuthRegister ? "Sign up to persist chats & access modular cores." : "Sign in to access your chat history.";
+                document.getElementById("authSub").innerText = isAuthRegister ? "Create an account to save titled chats." : "Sign in to access your chat history.";
                 document.getElementById("authSubmitBtn").innerText = isAuthRegister ? "Create Account" : "Sign In";
                 document.getElementById("authToggleText").innerText = isAuthRegister ? "Already have an account? Sign In" : "Don't have an account? Create one";
             }
@@ -756,8 +758,7 @@ async def serve_app():
                         localStorage.setItem("lemon_user_id", currentUserId);
                         localStorage.setItem("lemon_username", currentUsername);
                         authModal.style.display = "none";
-                        sidebarUsername.innerText = currentUsername;
-                        loadUserHistory();
+                        checkAuth();
                     } else {
                         alert(data.message || "Authentication failed.");
                     }
@@ -771,59 +772,71 @@ async def serve_app():
                 localStorage.removeItem("lemon_username");
                 currentUserId = null;
                 currentUsername = null;
+                currentSessionId = 0;
                 chatStream.innerHTML = "";
                 closeSidebar();
                 checkAuth();
             }
 
-            // Dual Sync: Database + Local Storage Backup so chats NEVER disappear
-            async function loadUserHistory() {
-                chatStream.innerHTML = "";
-                let localChats = getLocalChats();
-
+            // Load Chat Sessions List with AI generated titles
+            async function loadSessionsList() {
+                if (!currentUserId) return;
                 try {
-                    const res = await fetch(`/api/history/${currentUserId}`);
+                    const res = await fetch(`/api/sessions/${currentUserId}`);
                     const data = await res.json();
-                    
-                    if (data.history && data.history.length > 0) {
-                        data.history.forEach(h => appendMessage(h.role === "assistant" ? "lemon" : "user", h.content, h.emotion, false));
-                        // Update local cache
-                        localStorage.setItem(getLocalChatKey(), JSON.stringify(data.history));
-                    } else if (localChats.length > 0) {
-                        // Render was wiped: Restore from Local Cache & Sync back to Server!
-                        localChats.forEach(h => appendMessage(h.role === "assistant" ? "lemon" : "user", h.content, h.emotion, false));
-                        syncToServer(localChats);
+                    sessionsList.innerHTML = "";
+                    if (data.sessions && data.sessions.length > 0) {
+                        data.sessions.forEach(s => {
+                            const item = document.createElement("div");
+                            item.className = `session-item ${s.id === currentSessionId ? 'active' : ''}`;
+                            item.innerHTML = `
+                                <div class="session-title" onclick="openSession(${s.id})">💬 ${s.title}</div>
+                                <span class="session-delete" onclick="deleteSession(event, ${s.id})" title="Delete">✕</span>
+                            `;
+                            sessionsList.appendChild(item);
+                        });
                     } else {
-                        appendMessage("lemon", `Hello ${currentUsername}! I am Lemon, created by Utkarsh Bandhu. Your chats will now be permanently saved. Open the menu (☰) to switch cores!`, "Brilliant", false);
+                        sessionsList.innerHTML = `<div style="font-size:12px; color:#64748b; padding:10px;">No saved chats yet.</div>`;
                     }
                 } catch(e) {
-                    // Fallback to local storage if network fails
-                    if (localChats.length > 0) {
-                        localChats.forEach(h => appendMessage(h.role === "assistant" ? "lemon" : "user", h.content, h.emotion, false));
-                    }
+                    console.log("Sessions list error:", e);
                 }
             }
 
-            async function syncToServer(chats) {
-                try {
-                    const fd = new FormData();
-                    fd.append("user_id", currentUserId);
-                    fd.append("history_json", JSON.stringify(chats));
-                    await fetch("/api/sync-history", { method: "POST", body: fd });
-                } catch(e) {
-                    console.log("Sync error:", e);
-                }
-            }
-
-            async function clearChat() {
-                if (!confirm("Are you sure you want to clear your conversation history?")) return;
-                const fd = new FormData();
-                fd.append("user_id", currentUserId);
-                await fetch("/api/clear-history", { method: "POST", body: fd });
-                localStorage.removeItem(getLocalChatKey());
+            function startNewChat() {
+                currentSessionId = 0;
                 chatStream.innerHTML = "";
-                appendMessage("lemon", "Your conversation history has been cleared.", "Serene", false);
+                chatStream.appendChild(heroGreeting);
+                heroGreeting.style.display = "flex";
                 closeSidebar();
+                dockStatus.innerText = "● Ready for new chat";
+            }
+
+            async function openSession(id) {
+                currentSessionId = id;
+                closeSidebar();
+                heroGreeting.style.display = "none";
+                chatStream.innerHTML = "";
+
+                try {
+                    const res = await fetch(`/api/session-messages/${id}`);
+                    const data = await res.json();
+                    if (data.messages) {
+                        data.messages.forEach(m => appendMessage(m.role === "assistant" ? "lemon" : "user", m.content, m.emotion));
+                    }
+                } catch(e) {
+                    console.log("Error loading session:", e);
+                }
+            }
+
+            async function deleteSession(e, id) {
+                e.stopPropagation();
+                if (!confirm("Delete this conversation?")) return;
+                const fd = new FormData();
+                fd.append("session_id", id);
+                await fetch("/api/delete-session", { method: "POST", body: fd });
+                if (currentSessionId === id) startNewChat();
+                loadSessionsList();
             }
 
             function setThinking(active, label = "Thinking & analyzing...") {
@@ -835,7 +848,7 @@ async def serve_app():
                         currentThinkingEl.innerHTML = `
                             <div class="thinking-box">
                                 <div class="tdot"></div><div class="tdot"></div><div class="tdot"></div>
-                                <span style="font-size:12px; color:#facc15; margin-left:4px;">Processing...</span>
+                                <span style="font-size:12px; color:#facc15; margin-left:4px;">Thinking...</span>
                             </div>
                         `;
                         chatStream.appendChild(currentThinkingEl);
@@ -866,8 +879,10 @@ async def serve_app():
                 }
             }
 
-            function appendMessage(sender, text, emotion = null, shouldSave = true) {
+            function appendMessage(sender, text, emotion = null) {
                 setThinking(false);
+                if (heroGreeting) heroGreeting.style.display = "none";
+
                 const group = document.createElement("div");
                 group.className = `bubble-group ${sender}`;
 
@@ -877,7 +892,7 @@ async def serve_app():
                     const safeText = encodeURIComponent(text);
                     html = `
                         <div class="bubble-meta">
-                            <span>Lemon <span class="equalizer" id="eq"><span class="eq-bar"></span><span class="eq-bar"></span><span class="eq-bar"></span></span></span>
+                            <span>Lemon</span>
                             <button class="play-audio-btn" onclick="playSpecificMessage(decodeURIComponent('${safeText}'))">▶ Listen</button>
                         </div>
                         <div class="bubble lemon">${tag}${text}</div>
@@ -889,20 +904,10 @@ async def serve_app():
                 group.innerHTML = html;
                 chatStream.appendChild(group);
                 chatStream.scrollTop = chatStream.scrollHeight;
-
-                if (shouldSave) {
-                    saveLocalChat(sender === "lemon" ? "assistant" : "user", text, emotion);
-                }
             }
 
-            audioElement.onplay = () => {
-                document.querySelectorAll(".equalizer").forEach(e => e.classList.add("speaking"));
-                dockStatus.innerText = "🔊 Lemon is speaking...";
-            };
-            audioElement.onended = () => {
-                document.querySelectorAll(".equalizer").forEach(e => e.classList.remove("speaking"));
-                dockStatus.innerText = "● Ready";
-            };
+            audioElement.onplay = () => { dockStatus.innerText = "🔊 Lemon is speaking..."; };
+            audioElement.onended = () => { dockStatus.innerText = "● Ready"; };
 
             async function sendTextQuery() {
                 const text = textInput.value.trim();
@@ -915,12 +920,14 @@ async def serve_app():
                 const fd = new FormData();
                 fd.append("text", text);
                 fd.append("user_id", currentUserId);
+                fd.append("session_id", currentSessionId);
                 fd.append("mode", activeCore);
                 fd.append("voice_enabled", isVoiceEnabled);
 
                 try {
                     const res = await fetch("/text-process", { method: "POST", body: fd });
                     const data = await res.json();
+                    currentSessionId = data.session_id; // Set session id if this was a new chat
                     appendMessage("lemon", data.reply_text, data.emotion);
                     if (isVoiceEnabled && data.audio_base64) {
                         audioElement.src = data.audio_base64;
@@ -950,7 +957,7 @@ async def serve_app():
                         mediaRecorder.start();
                         isRecording = true;
                         micBtn.classList.add("active-record");
-                        dockStatus.innerText = "🔴 Listening... Tap mic to send";
+                        dockStatus.innerText = "🔴 Listening... Tap mic again to send";
                     } catch(err) {
                         alert("Microphone permission required.");
                     }
@@ -966,12 +973,14 @@ async def serve_app():
                 const fd = new FormData();
                 fd.append("file", blob, "voice.wav");
                 fd.append("user_id", currentUserId);
+                fd.append("session_id", currentSessionId);
                 fd.append("mode", activeCore);
                 fd.append("voice_enabled", isVoiceEnabled);
 
                 try {
                     const res = await fetch("/voice-process", { method: "POST", body: fd });
                     const data = await res.json();
+                    currentSessionId = data.session_id;
                     if (data.user_text) appendMessage("user", data.user_text);
                     appendMessage("lemon", data.reply_text, data.emotion);
                     if (isVoiceEnabled && data.audio_base64) {
