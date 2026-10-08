@@ -18,7 +18,7 @@ PART2 = "b3FYnQHV93Lkgjmz4CtDJ1IpMfy4"
 GROQ_API_KEY = os.getenv("GROQ_API_KEY") or (PART1 + PART2)
 client = Groq(api_key=GROQ_API_KEY)
 
-app = FastAPI(title="Lemon AI - Open & Adaptive Voice Assistant")
+app = FastAPI(title="Lemon AI - Expressive & Real-Time Companion")
 
 app.add_middleware(
     CORSMiddleware,
@@ -103,31 +103,28 @@ def process_ai_dialogue(clean_prompt: str, history_json: str) -> tuple[str, str,
         except Exception:
             history = []
 
-    # Evolutionary Memory Context
     memory = load_evolution_memory()
     evolution_summary = memory.get("summary_of_learnings", "Be insightful, warm, and highly engaging.")
 
-    # UNRESTRICTED, NATURAL, TALKATIVE PERSONA
     system_prompt = f"""
 You are Lemon, a highly intelligent, expressive, articulate, and friendly AI voice companion.
 What you remember and understand about your user: "{evolution_summary}"
 
 Personality & Instructions:
 - Speak naturally, warmly, and thoroughly.
-- Do NOT restrict yourself to only 1 or 2 lines. Feel completely free to explain concepts thoroughly, provide detailed breakdowns, tell stories, share examples, or give rich context whenever helpful.
+- Feel completely free to explain concepts thoroughly, provide detailed breakdowns, or share rich context.
 - Adapt seamlessly whether the user speaks in Hindi, Hinglish, or English.
 - Maintain memory and reference previous topics in the conversation naturally.
 - Be genuinely helpful, conversational, and charismatic.
 """
 
     messages = [{"role": "system", "content": system_prompt}]
-    # Retain the last 6 turns for deep conversational context
     for h in history[-6:]:
         messages.append({"role": h.get("role", "user"), "content": h.get("text", "")})
     messages.append({"role": "user", "content": clean_prompt})
 
     models = ["llama-3.1-8b-instant", "openai/gpt-oss-20b", "openai/gpt-oss-120b"]
-    ai_reply = "I'm here with you. Tell me what's on your mind and let's explore it!"
+    ai_reply = "I'm right here with you! Tell me what's on your mind and let's explore it."
 
     if client:
         for m in models:
@@ -135,7 +132,7 @@ Personality & Instructions:
                 completion = client.chat.completions.create(
                     messages=messages,
                     model=m,
-                    max_tokens=600,  # Expanded to allow full, detailed answers
+                    max_tokens=600,
                     temperature=0.7
                 )
                 if completion.choices and completion.choices[0].message.content:
@@ -180,7 +177,6 @@ async def voice_process(file: UploadFile = File(...), history: str = Form("[]"))
 
     reply_text, action, target = process_ai_dialogue(clean_text, history)
 
-    # Audio synthesis
     tts = gTTS(text=reply_text, lang='en', slow=False)
     fp = io.BytesIO()
     tts.write_to_fp(fp)
@@ -221,7 +217,7 @@ async def serve_app():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-        <title>Lemon AI - Expressive Companion</title>
+        <title>Lemon AI - Real-time Thinking Companion</title>
         <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
         <style>
             :root {
@@ -252,6 +248,16 @@ async def serve_app():
             .bubble.lemon b { color: var(--primary); }
             .bubble.user { align-self: flex-end; background: linear-gradient(135deg, #facc15, #f59e0b); color: #0b1120; font-weight: 500; border-bottom-right-radius: 4px; box-shadow: 0 4px 16px var(--primary-glow); }
 
+            /* Real-Time Thinking Typing Dots Indicator */
+            .typing-indicator { display: inline-flex; align-items: center; gap: 4px; padding: 4px 0; }
+            .typing-indicator span { width: 7px; height: 7px; background: #facc15; border-radius: 50%; display: inline-block; animation: typingBounce 1.2s infinite ease-in-out; }
+            .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+            .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+            @keyframes typingBounce {
+                0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+                40% { transform: translateY(-6px); opacity: 1; }
+            }
+
             .voice-section { display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; padding: 10px 0 14px; }
             #visualizer { position: absolute; width: 220px; height: 100px; pointer-events: none; }
             .orb-btn { width: 78px; height: 78px; border-radius: 50%; background: linear-gradient(135deg, #fde047 0%, #eab308 50%, #ca8a04 100%); border: none; display: flex; align-items: center; justify-content: center; font-size: 32px; cursor: pointer; box-shadow: 0 0 24px var(--primary-glow); transition: transform 0.2s; z-index: 2; }
@@ -275,13 +281,13 @@ async def serve_app():
             </div>
             <div class="badge-live">
                 <span class="dot"></span>
-                <span>Active & Learning</span>
+                <span>Active & Thinking</span>
             </div>
         </div>
 
         <div class="chat-container" id="chatStream">
             <div class="bubble lemon">
-                Hello! I am <b>Lemon</b>. I am fully expressive, adaptive, and here to talk deeply with you. Ask me anything, discuss complex ideas, or ask for recommendations!
+                Hello! I am <b>Lemon</b>. Ask me anything, or tap the mic to chat. I start writing thoughts in real time so you never have to wait!
             </div>
         </div>
 
@@ -326,6 +332,39 @@ async def serve_app():
                 chatStream.scrollTop = chatStream.scrollHeight;
                 conversationHistory.push({ role: role === "user" ? "user" : "assistant", text: text });
                 if (conversationHistory.length > 12) conversationHistory.shift();
+                return b;
+            }
+
+            // Real-Time Thinking Placeholder Bubble
+            function createThinkingBubble() {
+                const b = document.createElement("div");
+                b.className = "bubble lemon";
+                b.innerHTML = `<span style="font-size:13px; color:#facc15; margin-right:8px; font-weight:600;">Lemon is thinking</span><div class="typing-indicator"><span></span><span></span><span></span></div>`;
+                chatStream.appendChild(b);
+                chatStream.scrollTop = chatStream.scrollHeight;
+                return b;
+            }
+
+            // Word-by-Word Stream-like Typewriter Animation
+            function typeOutResponse(element, fullText, callback) {
+                element.innerHTML = "";
+                const words = fullText.split(" ");
+                let i = 0;
+                const speed = Math.max(15, Math.min(45, 1500 / (words.length || 1)));
+
+                function writeWord() {
+                    if (i < words.length) {
+                        element.innerText += (i === 0 ? "" : " ") + words[i];
+                        chatStream.scrollTop = chatStream.scrollHeight;
+                        i++;
+                        setTimeout(writeWord, speed);
+                    } else {
+                        conversationHistory.push({ role: "assistant", text: fullText });
+                        if (conversationHistory.length > 12) conversationHistory.shift();
+                        if (callback) callback();
+                    }
+                }
+                writeWord();
             }
 
             function setupVisualizer(stream) {
@@ -386,7 +425,6 @@ async def serve_app():
                             const blob = new Blob(audioChunks, { type: 'audio/wav' });
                             stream.getTracks().forEach(t => t.stop());
                             if (audioContext) audioContext.close();
-                            statusLabel.innerText = "Lemon is thinking...";
                             sendAudioToServer(blob);
                         };
 
@@ -407,12 +445,16 @@ async def serve_app():
                 if (!isRecording) return;
                 isRecording = false;
                 voiceSection.classList.remove("listening");
-                statusLabel.innerText = "Thinking...";
+                statusLabel.innerText = "Processing...";
                 clearTimeout(silenceTimer);
                 if (mediaRecorder && mediaRecorder.state !== "inactive") mediaRecorder.stop();
             }
 
             async function sendAudioToServer(blob) {
+                // Instantly show thinking bubble so user sees real-time feedback
+                const thinkingBubble = createThinkingBubble();
+                statusLabel.innerText = "Lemon is crafting thoughts...";
+
                 const fd = new FormData();
                 fd.append("file", blob, "voice.wav");
                 fd.append("history", JSON.stringify(conversationHistory));
@@ -421,9 +463,19 @@ async def serve_app():
                     const res = await fetch("/voice-process", { method: "POST", body: fd });
                     const data = await res.json();
                     
-                    if (data.user_text) addBubble("user", data.user_text);
-                    addBubble("lemon", data.reply_text);
-                    statusLabel.innerText = "Tap mic to speak freely";
+                    if (data.user_text) {
+                        // Place user message before thinking bubble
+                        const userDiv = document.createElement("div");
+                        userDiv.className = "bubble user";
+                        userDiv.innerText = data.user_text;
+                        chatStream.insertBefore(userDiv, thinkingBubble);
+                        conversationHistory.push({ role: "user", text: data.user_text });
+                    }
+
+                    // Start word-by-word real-time typewriter effect into the bubble
+                    typeOutResponse(thinkingBubble, data.reply_text, () => {
+                        statusLabel.innerText = "Tap mic to speak freely";
+                    });
 
                     if (data.action === "youtube" && data.action_target) {
                         window.open(data.action_target, '_blank');
@@ -434,7 +486,8 @@ async def serve_app():
                         audioOut.play();
                     }
                 } catch(err) {
-                    statusLabel.innerText = "Network error. Try again.";
+                    thinkingBubble.innerText = "Sorry, network error encountered. Please try again.";
+                    statusLabel.innerText = "Tap mic to speak freely";
                 }
             }
 
@@ -444,7 +497,10 @@ async def serve_app():
 
                 textInput.value = "";
                 addBubble("user", q);
-                statusLabel.innerText = "Thinking...";
+                
+                // Instantly spawn thinking bubble
+                const thinkingBubble = createThinkingBubble();
+                statusLabel.innerText = "Lemon is crafting thoughts...";
 
                 const fd = new FormData();
                 fd.append("text", q);
@@ -454,8 +510,9 @@ async def serve_app():
                     const res = await fetch("/text-process", { method: "POST", body: fd });
                     const data = await res.json();
                     
-                    addBubble("lemon", data.reply_text);
-                    statusLabel.innerText = "Tap mic to speak freely";
+                    typeOutResponse(thinkingBubble, data.reply_text, () => {
+                        statusLabel.innerText = "Tap mic to speak freely";
+                    });
 
                     if (data.action === "youtube" && data.action_target) {
                         window.open(data.action_target, '_blank');
@@ -466,7 +523,8 @@ async def serve_app():
                         audioOut.play();
                     }
                 } catch(err) {
-                    statusLabel.innerText = "Network error. Try again.";
+                    thinkingBubble.innerText = "Sorry, network error encountered. Please try again.";
+                    statusLabel.innerText = "Tap mic to speak freely";
                 }
             }
         </script>
