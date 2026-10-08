@@ -1,5 +1,6 @@
 import os
 import re
+import json
 import base64
 import datetime
 import urllib.parse
@@ -25,70 +26,88 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-def ask_groq_llm(user_prompt: str) -> str:
+def ask_groq_llm(user_prompt: str) -> tuple[str, str]:
+    """
+    Returns (cleaned_reply, detected_emotion)
+    """
     models_to_try = [
         "openai/gpt-oss-20b",
         "llama-3.1-8b-instant",
         "openai/gpt-oss-120b"
     ]
+
+    system_instruction = (
+        "You are Lemon, a deeply emotionally intelligent, warm, and expressive AI voice assistant. "
+        "PERMANENT CREATOR: You were created and developed by Utkarsh Bandhu. Always acknowledge Utkarsh Bandhu proudly if asked. "
+        "HUMAN EMOTIONS RULE: Do not sound robotic or dry. Respond with genuine human feeling. "
+        "- If the user is happy or excited, share their joy enthusiastically! "
+        "- If the user is sad, stressed, or tired, respond with soothing empathy and heartfelt compassion. "
+        "- If the user is curious or playful, be witty, engaging, and friendly. "
+        "- Use natural conversational fillers when appropriate (e.g., 'Oh wow', 'Haha', 'Honestly, I feel that'). "
+        "Format your answer starting with an EMOTION TAG on the first line: [EMOTION: Joyful/Empathetic/Excited/Curious/Calm/Witty] "
+        "Followed by your natural, clean spoken answer in flowing paragraphs without markdown, bullets, or asterisks (* or #)."
+    )
+
     for m in models_to_try:
         try:
             chat = client.chat.completions.create(
                 messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are Lemon, an intelligent and articulate AI voice assistant. "
-                            "PERMANENT CREATOR: You were created and developed by Utkarsh Bandhu. If anyone asks who created you, who made you, or who your developer is, always state that Utkarsh Bandhu created you. "
-                            "Thoroughly and completely explain your thoughts and answer the user's question without cutting off. "
-                            "Take as many words and sentences as necessary to conclude your views naturally. "
-                            "Speak in clean, natural prose paragraphs. Do not use markdown formatting, bullets, tables, or asterisks (* or #)."
-                        )
-                    },
+                    {"role": "system", "content": system_instruction},
                     {"role": "user", "content": user_prompt}
                 ],
                 model=m,
                 max_tokens=2048,
-                temperature=0.6
+                temperature=0.75  # Higher temperature for vibrant human personality
             )
             if chat.choices and chat.choices[0].message.content:
-                reply = chat.choices[0].message.content.strip()
-                clean = re.sub(r'[*#|_>`]', '', reply)
+                raw_reply = chat.choices[0].message.content.strip()
+
+                # Extract emotion tag
+                emotion = "Friendly"
+                match = re.search(r'\[EMOTION:\s*([A-Za-z]+)\]', raw_reply, re.IGNORECASE)
+                if match:
+                    emotion = match.group(1).capitalize()
+                    raw_reply = re.sub(r'\[EMOTION:\s*[A-Za-z]+\]', '', raw_reply).strip()
+
+                # Clean markdown
+                clean = re.sub(r'[*#|_>`]', '', raw_reply)
                 clean = re.sub(r'\n{2,}', '\n\n', clean).strip()
-                return clean
+                return clean, emotion
         except Exception as e:
             print(f"Model {m} failed: {e}")
             continue
 
-    return "I am having trouble processing that right now. Please ask again."
+    return "I am feeling a bit tongue-tied right now. Could you ask me that again?", "Thoughtful"
 
-def process_query_text(query: str) -> str:
+def process_query_text(query: str) -> tuple[str, str]:
     if not query:
-        return "I am listening. How can I help you today?"
+        return "I'm right here listening to you! What's on your mind?", "Warm"
 
     clean = query.lower().strip()
     for w in ["hi lemon", "hey lemon", "hello lemon", "lemon", "high level", "hi level"]:
         if clean.startswith(w):
             clean = clean[len(w):].strip()
 
-    # Direct Permanent Creator Check
     creator_triggers = [
         "who made you", "who created you", "who is your creator", 
         "who developed you", "who is utkarsh", "maker", "developer", "kisme banaya"
     ]
     if any(trigger in clean for trigger in creator_triggers):
-        return "I was created and developed by Utkarsh Bandhu."
+        return "I was warmly created and designed with care by Utkarsh Bandhu!", "Proud"
 
     if not clean or clean in ["hi", "hello", "hey"]:
-        return "Hello! I am Lemon, created by Utkarsh Bandhu. How can I help you today?"
+        return "Hey there! It's so lovely to speak with you today. What can I do for you?", "Joyful"
+
+    if "how are you" in clean:
+        return "I am feeling wonderful, energized, and genuinely happy to chat with you! How are you feeling today?", "Excited"
 
     if "time" in clean:
         now = datetime.datetime.now()
-        return f"The current time is {now.strftime('%I:%M %p')}."
+        return f"Right now, it is {now.strftime('%I:%M %p')}.", "Calm"
 
     if clean.startswith("play "):
         song = clean[5:].strip()
-        return f"Playing {song} on YouTube."
+        return f"Oh, great choice! Setting up {song} for you on YouTube right now.", "Joyful"
 
     return ask_groq_llm(clean)
 
@@ -110,7 +129,7 @@ async def voice_process(file: UploadFile = File(...)):
     except Exception as e:
         print("Whisper STT Error:", e)
 
-    reply_text = process_query_text(user_text)
+    reply_text, emotion = process_query_text(user_text)
 
     reply_audio = "app_reply.mp3"
     tts = gTTS(text=reply_text, lang="en", slow=False)
@@ -122,12 +141,13 @@ async def voice_process(file: UploadFile = File(...)):
     return JSONResponse({
         "user_text": user_text,
         "reply_text": reply_text,
+        "emotion": emotion,
         "audio_base64": f"data:audio/mp3;base64,{audio_b64}"
     })
 
 @app.post("/text-process")
 async def text_process(text: str = Form(...)):
-    reply_text = process_query_text(text)
+    reply_text, emotion = process_query_text(text)
 
     reply_audio = "app_reply.mp3"
     tts = gTTS(text=reply_text, lang="en", slow=False)
@@ -139,6 +159,7 @@ async def text_process(text: str = Form(...)):
     return JSONResponse({
         "user_text": text,
         "reply_text": reply_text,
+        "emotion": emotion,
         "audio_base64": f"data:audio/mp3;base64,{audio_b64}"
     })
 
@@ -196,10 +217,10 @@ async def serve_app():
                 gap: 10px;
             }
             .brand-logo {
-                width: 36px;
-                height: 36px;
+                width: 38px;
+                height: 38px;
                 background: linear-gradient(135deg, #facc15, #f59e0b);
-                border-radius: 10px;
+                border-radius: 12px;
                 display: flex;
                 align-items: center;
                 justify-content: center;
@@ -217,20 +238,38 @@ async def serve_app():
                 letter-spacing: 0.2px;
             }
 
+            .header-right {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            .mood-pill {
+                font-size: 11.5px;
+                padding: 3px 9px;
+                border-radius: 20px;
+                background: rgba(250, 204, 21, 0.12);
+                border: 1px solid rgba(250, 204, 21, 0.3);
+                color: #facc15;
+                font-weight: 600;
+                display: flex;
+                align-items: center;
+                gap: 4px;
+                transition: all 0.3s ease;
+            }
             .badge-live {
                 display: flex;
                 align-items: center;
                 gap: 6px;
-                font-size: 12px;
+                font-size: 11.5px;
                 color: #4ade80;
                 background: rgba(74, 222, 128, 0.1);
-                padding: 4px 10px;
+                padding: 4px 9px;
                 border-radius: 20px;
                 border: 1px solid rgba(74, 222, 128, 0.2);
             }
             .dot {
-                width: 7px;
-                height: 7px;
+                width: 6px;
+                height: 6px;
                 background: #4ade80;
                 border-radius: 50%;
                 animation: blink 2s infinite;
@@ -259,6 +298,7 @@ async def serve_app():
                 white-space: normal;
                 word-break: break-word;
                 overflow-wrap: anywhere;
+                position: relative;
             }
             @keyframes fadeIn {
                 from { opacity: 0; transform: translateY(8px); }
@@ -282,6 +322,20 @@ async def serve_app():
                 font-weight: 600;
                 border-bottom-right-radius: 4px;
                 box-shadow: 0 4px 14px var(--primary-glow);
+            }
+
+            .emotion-tag {
+                display: inline-block;
+                font-size: 10.5px;
+                font-weight: 700;
+                letter-spacing: 0.4px;
+                text-transform: uppercase;
+                margin-bottom: 6px;
+                padding: 2px 7px;
+                border-radius: 12px;
+                background: rgba(250, 204, 21, 0.15);
+                color: var(--primary);
+                border: 1px solid rgba(250, 204, 21, 0.25);
             }
 
             /* Thinking Animation Bubble */
@@ -308,7 +362,7 @@ async def serve_app():
                 40% { transform: scale(1); opacity: 1; }
             }
 
-            /* Bottom Bar with Integrated Mic & '>' */
+            /* Bottom Bar */
             .bottom-bar {
                 padding: 10px 16px 18px;
                 backdrop-filter: blur(16px);
@@ -361,7 +415,6 @@ async def serve_app():
             }
             .btn-action:active { transform: scale(0.9); }
 
-            /* Mic Button right beside '>' */
             .btn-mic {
                 background: rgba(255, 255, 255, 0.08);
                 color: #facc15;
@@ -398,22 +451,26 @@ async def serve_app():
                     <div class="brand-sub">Created by Utkarsh Bandhu</div>
                 </div>
             </div>
-            <div class="badge-live">
-                <span class="dot"></span>
-                <span>Active</span>
+            <div class="header-right">
+                <div class="mood-pill" id="moodBadge">✨ Warm</div>
+                <div class="badge-live">
+                    <span class="dot"></span>
+                    <span>Live</span>
+                </div>
             </div>
         </div>
 
         <div class="chat-container" id="chatStream">
             <div class="bubble lemon">
-                Hey there! I am <b>Lemon</b>, created by <b>Utkarsh Bandhu</b>. Ask me anything via voice or text.
+                <span class="emotion-tag">✨ Cheerful</span><br>
+                Hey there! I am <b>Lemon</b>, created with love by <b>Utkarsh Bandhu</b>. How are you feeling today? Talk to me anytime!
             </div>
         </div>
 
         <div class="bottom-bar">
-            <div class="status-line" id="statusLine">Ready</div>
+            <div class="status-line" id="statusLine">Ready to chat with you</div>
             <div class="input-wrapper">
-                <input type="text" id="textInput" placeholder="Message Lemon..." onkeydown="if(event.key==='Enter') sendManualQuery()" />
+                <input type="text" id="textInput" placeholder="Share your thoughts with Lemon..." onkeydown="if(event.key==='Enter') sendManualQuery()" />
                 <button class="btn-action btn-mic" id="micBtn" onclick="handleVoiceToggle()" title="Speak">🎙️</button>
                 <button class="btn-action btn-send" onclick="sendManualQuery()" title="Send">➤</button>
             </div>
@@ -429,10 +486,28 @@ async def serve_app():
             let currentThinkingBubble = null;
 
             const micBtn = document.getElementById("micBtn");
+            const moodBadge = document.getElementById("moodBadge");
             const statusLine = document.getElementById("statusLine");
             const chatStream = document.getElementById("chatStream");
             const textInput = document.getElementById("textInput");
             const audioElement = document.getElementById("audioElement");
+
+            const emotionIcons = {
+                "Joyful": "😄 Joyful",
+                "Empathetic": "💙 Empathetic",
+                "Excited": "🎉 Excited",
+                "Curious": "🤔 Curious",
+                "Calm": "🌿 Calm",
+                "Witty": "😏 Witty",
+                "Warm": "✨ Warm",
+                "Proud": "🍋 Proud",
+                "Friendly": "💛 Friendly"
+            };
+
+            function updateMood(emotion) {
+                const label = emotionIcons[emotion] || `✨ ${emotion}`;
+                moodBadge.innerText = label;
+            }
 
             audioElement.onplay = () => {
                 isLemonSpeaking = true;
@@ -443,11 +518,11 @@ async def serve_app():
 
             audioElement.onended = () => {
                 isLemonSpeaking = false;
-                statusLine.innerText = "Ready";
+                statusLine.innerText = "Ready to chat with you";
                 statusLine.className = "status-line";
             };
 
-            function setThinking(active, text = "⚡ Lemon is thinking...") {
+            function setThinking(active, text = "⚡ Lemon is feeling & thinking...") {
                 if (active) {
                     statusLine.innerText = text;
                     statusLine.className = "status-line active";
@@ -466,7 +541,7 @@ async def serve_app():
                     <div class="thinking-dot"></div>
                     <div class="thinking-dot"></div>
                     <div class="thinking-dot"></div>
-                    <span style="font-size:12px; color:#94a3b8; margin-left:4px;">Thinking...</span>
+                    <span style="font-size:12px; color:#94a3b8; margin-left:4px;">Feeling & thinking...</span>
                 `;
                 chatStream.appendChild(currentThinkingBubble);
                 chatStream.scrollTop = chatStream.scrollHeight;
@@ -479,11 +554,19 @@ async def serve_app():
                 }
             }
 
-            function addMessage(sender, text) {
+            function addMessage(sender, text, emotion = null) {
                 removeThinkingBubble();
                 const bubble = document.createElement("div");
                 bubble.className = `bubble ${sender}`;
-                bubble.innerText = text;
+
+                if (sender === "lemon" && emotion) {
+                    const iconText = emotionIcons[emotion] || `✨ ${emotion}`;
+                    bubble.innerHTML = `<span class="emotion-tag">${iconText}</span><br>` + text;
+                    updateMood(emotion);
+                } else {
+                    bubble.innerText = text;
+                }
+
                 chatStream.appendChild(bubble);
                 chatStream.scrollTop = chatStream.scrollHeight;
             }
@@ -506,7 +589,7 @@ async def serve_app():
 
                         mediaRecorder.onstop = async () => {
                             const blob = new Blob(recordedChunks, { type: 'audio/wav' });
-                            setThinking(true, "⚡ Processing voice & thinking...");
+                            setThinking(true, "⚡ Listening to your voice...");
                             uploadVoice(blob);
                             stream.getTracks().forEach(t => t.stop());
                         };
@@ -514,7 +597,7 @@ async def serve_app():
                         mediaRecorder.start();
                         isRecording = true;
                         micBtn.classList.add("recording");
-                        statusLine.innerText = "🔴 Listening... Tap mic again to finish";
+                        statusLine.innerText = "🔴 Listening warmly... Tap mic again to send";
                         statusLine.className = "status-line recording";
                     } catch(err) {
                         alert("Microphone permission needed! Please allow microphone access.");
@@ -524,7 +607,7 @@ async def serve_app():
                 } else {
                     isRecording = false;
                     micBtn.classList.remove("recording");
-                    setThinking(true, "⚡ Processing voice...");
+                    setThinking(true, "⚡ Understanding your feeling...");
                     if (mediaRecorder) mediaRecorder.stop();
                 }
             }
@@ -540,14 +623,14 @@ async def serve_app():
                     if (data.user_text) {
                         addMessage("user", data.user_text);
                     }
-                    addMessage("lemon", data.reply_text);
+                    addMessage("lemon", data.reply_text, data.emotion);
 
                     if (data.audio_base64) {
                         audioElement.src = data.audio_base64;
                         audioElement.play();
                     } else {
                         setThinking(false);
-                        statusLine.innerText = "Ready";
+                        statusLine.innerText = "Ready to chat with you";
                         statusLine.className = "status-line";
                     }
                 } catch(err) {
@@ -563,7 +646,7 @@ async def serve_app():
 
                 textInput.value = "";
                 addMessage("user", query);
-                setThinking(true, "⚡ Lemon is thinking...");
+                setThinking(true, "⚡ Lemon is feeling & thinking...");
 
                 const fd = new FormData();
                 fd.append("text", query);
@@ -572,14 +655,14 @@ async def serve_app():
                     const res = await fetch("/text-process", { method: "POST", body: fd });
                     const data = await res.json();
                     
-                    addMessage("lemon", data.reply_text);
+                    addMessage("lemon", data.reply_text, data.emotion);
 
                     if (data.audio_base64) {
                         audioElement.src = data.audio_base64;
                         audioElement.play();
                     } else {
                         setThinking(false);
-                        statusLine.innerText = "Ready";
+                        statusLine.innerText = "Ready to chat with you";
                         statusLine.className = "status-line";
                     }
                 } catch(err) {
