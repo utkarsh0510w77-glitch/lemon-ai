@@ -1,13 +1,14 @@
+import os
+import io
+import uuid
+import json
 import base64
 import datetime
-import io
-import json
-import os
 import urllib.parse
-import uuid
-from fastapi import FastAPI, File, Form, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from groq import Groq
 from gtts import gTTS
 
@@ -17,7 +18,7 @@ PART2 = "b3FYnQHV93Lkgjmz4CtDJ1IpMfy4"
 GROQ_API_KEY = os.getenv("GROQ_API_KEY") or (PART1 + PART2)
 client = Groq(api_key=GROQ_API_KEY)
 
-app = FastAPI(title="Lemon AI - Self Evolving Voice Assistant")
+app = FastAPI(title="Lemon AI - Open & Adaptive Voice Assistant")
 
 app.add_middleware(
     CORSMiddleware,
@@ -29,223 +30,198 @@ app.add_middleware(
 
 MEMORY_FILE = "lemon_evolution_memory.json"
 
-
 def load_evolution_memory() -> dict:
-  if os.path.exists(MEMORY_FILE):
-    try:
-      with open(MEMORY_FILE, "r") as f:
-        return json.load(f)
-    except Exception:
-      pass
-  return {
-      "learned_user_traits": [],
-      "conversation_count": 0,
-      "summary_of_learnings": (
-          "User prefers fast, smart, conversational assistance."
-      ),
-  }
-
+    if os.path.exists(MEMORY_FILE):
+        try:
+            with open(MEMORY_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {
+        "learned_user_traits": [],
+        "conversation_count": 0,
+        "summary_of_learnings": "User enjoys insightful, friendly, engaging, and in-depth discussions."
+    }
 
 def save_evolution_memory(data: dict):
-  try:
-    with open(MEMORY_FILE, "w") as f:
-      json.dump(data, f, indent=2)
-  except Exception as e:
-    print("Memory save error:", e)
-
-
-# Background evolution agent: learns facts about user & updates self-personality
-def evolve_lemon_memory(user_msg: str, bot_msg: str):
-  memory_data = load_evolution_memory()
-  memory_data["conversation_count"] += 1
-
-  # Trigger deeper learning synthesis periodically or when relevant
-  if client and len(user_msg.split()) > 3:
     try:
-      prompt = f"""
+        with open(MEMORY_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+    except Exception as e:
+        print("Memory save error:", e)
+
+def evolve_lemon_memory(user_msg: str, bot_msg: str):
+    memory_data = load_evolution_memory()
+    memory_data["conversation_count"] += 1
+    
+    if client and len(user_msg.split()) > 3:
+        try:
+            prompt = f"""
 You are the evolutionary metacognitive core of Lemon AI.
 Analyze this interaction:
 User: "{user_msg}"
-Lemon: "{bot_msg}"
+Lemon: "{bot_msg[:200]}"
 Existing Memory Summary: "{memory_data.get('summary_of_learnings')}"
 
-Extract any facts, preferred style, hobbies, tone, or key details about the user in 1 short sentence.
+Extract any facts, interests, preferred topics, tone, or key details about the user in 1 sentence.
 If nothing novel, return 'KEEP'.
 """
-      resp = client.chat.completions.create(
-          messages=[{"role": "user", "content": prompt}],
-          model="llama-3.1-8b-instant",
-          max_tokens=60,
-          temperature=0.3,
-      )
-      reflection = resp.choices[0].message.content.strip()
-      if reflection and "KEEP" not in reflection:
-        memory_data["learned_user_traits"].append(reflection)
-        memory_data["learned_user_traits"] = memory_data[
-            "learned_user_traits"
-        ][-8:]
-        memory_data["summary_of_learnings"] = "; ".join(
-            memory_data["learned_user_traits"]
-        )
-    except Exception as e:
-      print("Evolution learning error:", e)
+            resp = client.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                model="llama-3.1-8b-instant",
+                max_tokens=60,
+                temperature=0.3
+            )
+            reflection = resp.choices[0].message.content.strip()
+            if reflection and "KEEP" not in reflection:
+                memory_data["learned_user_traits"].append(reflection)
+                memory_data["learned_user_traits"] = memory_data["learned_user_traits"][-10:]
+                memory_data["summary_of_learnings"] = "; ".join(memory_data["learned_user_traits"])
+        except Exception as e:
+            print("Evolution learning error:", e)
+            
+    save_evolution_memory(memory_data)
 
-  save_evolution_memory(memory_data)
+def process_ai_dialogue(clean_prompt: str, history_json: str) -> tuple[str, str, str]:
+    action_type = ""
+    action_target = ""
 
+    # 1. Action commands
+    if clean_prompt.startswith("play "):
+        song = clean_prompt[5:].strip()
+        return f"Playing {song} on YouTube for you right now!", "youtube", f"https://www.youtube.com/results?search_query={urllib.parse.quote(song)}"
 
-def process_ai_dialogue(
-    clean_prompt: str, history_json: str
-) -> tuple[str, str, str]:
-  action_type = ""
-  action_target = ""
+    if "time" in clean_prompt and len(clean_prompt.split()) < 5:
+        now_time = datetime.datetime.now().strftime("%I:%M %p")
+        return f"The current time is {now_time}.", "", ""
 
-  # 1. Quick commands & Actions
-  if clean_prompt.startswith("play "):
-    song = clean_prompt[5:].strip()
-    return (
-        f"Playing {song} on YouTube for you.",
-        "youtube",
-        f"https://www.youtube.com/results?search_query={urllib.parse.quote(song)}",
-    )
+    # 2. Parse History
+    history = []
+    if history_json:
+        try:
+            history = json.loads(history_json)
+        except Exception:
+            history = []
 
-  if "time" in clean_prompt and len(clean_prompt.split()) < 6:
-    now_time = datetime.datetime.now().strftime("%I:%M %p")
-    return f"It is currently {now_time}.", "", ""
+    # Evolutionary Memory Context
+    memory = load_evolution_memory()
+    evolution_summary = memory.get("summary_of_learnings", "Be insightful, warm, and highly engaging.")
 
-  # 2. Parse History
-  history = []
-  if history_json:
-    try:
-      history = json.loads(history_json)
-    except Exception:
-      history = []
+    # UNRESTRICTED, NATURAL, TALKATIVE PERSONA
+    system_prompt = f"""
+You are Lemon, a highly intelligent, expressive, articulate, and friendly AI voice companion.
+What you remember and understand about your user: "{evolution_summary}"
 
-  # Load autonomous memory
-  memory = load_evolution_memory()
-  evolution_summary = memory.get(
-      "summary_of_learnings", "Be smart and conversational."
-  )
-
-  system_prompt = f"""
-You are Lemon, a hyper-intelligent, self-evolving, friendly AI voice companion.
-What you've learned about your user over time: "{evolution_summary}"
-Instruction:
-1. Always keep responses direct, warm, concise (1-2 spoken sentences).
-2. Adapt seamlessly if the user speaks Hindi, Hinglish, or English.
-3. Use context from previous messages naturally.
+Personality & Instructions:
+- Speak naturally, warmly, and thoroughly.
+- Do NOT restrict yourself to only 1 or 2 lines. Feel completely free to explain concepts thoroughly, provide detailed breakdowns, tell stories, share examples, or give rich context whenever helpful.
+- Adapt seamlessly whether the user speaks in Hindi, Hinglish, or English.
+- Maintain memory and reference previous topics in the conversation naturally.
+- Be genuinely helpful, conversational, and charismatic.
 """
 
-  messages = [{"role": "system", "content": system_prompt}]
-  # Add last 4 messages for conversational continuity
-  for h in history[-4:]:
-    messages.append({"role": h.get("role", "user"), "content": h.get("text", "")})
-  messages.append({"role": "user", "content": clean_prompt})
+    messages = [{"role": "system", "content": system_prompt}]
+    # Retain the last 6 turns for deep conversational context
+    for h in history[-6:]:
+        messages.append({"role": h.get("role", "user"), "content": h.get("text", "")})
+    messages.append({"role": "user", "content": clean_prompt})
 
-  # Multi-model reliability
-  models = ["llama-3.1-8b-instant", "openai/gpt-oss-20b", "openai/gpt-oss-120b"]
-  ai_reply = "I'm right here with you. What would you like to explore next?"
+    models = ["llama-3.1-8b-instant", "openai/gpt-oss-20b", "openai/gpt-oss-120b"]
+    ai_reply = "I'm here with you. Tell me what's on your mind and let's explore it!"
 
-  if client:
-    for m in models:
-      try:
-        completion = client.chat.completions.create(
-            messages=messages, model=m, max_tokens=90, temperature=0.7
-        )
-        if completion.choices and completion.choices[0].message.content:
-          ai_reply = completion.choices[0].message.content.strip()
-          break
-      except Exception:
-        continue
+    if client:
+        for m in models:
+            try:
+                completion = client.chat.completions.create(
+                    messages=messages,
+                    model=m,
+                    max_tokens=600,  # Expanded to allow full, detailed answers
+                    temperature=0.7
+                )
+                if completion.choices and completion.choices[0].message.content:
+                    ai_reply = completion.choices[0].message.content.strip()
+                    break
+            except Exception:
+                continue
 
-  # Trigger learning in background
-  evolve_lemon_memory(clean_prompt, ai_reply)
-  return ai_reply, action_type, action_target
-
+    evolve_lemon_memory(clean_prompt, ai_reply)
+    return ai_reply, action_type, action_target
 
 @app.post("/voice-process")
-async def voice_process(
-    file: UploadFile = File(...), history: str = Form("[]")
-):
-  raw_bytes = await file.read()
-  temp_in = f"in_{uuid.uuid4().hex[:8]}.wav"
-  with open(temp_in, "wb") as f:
-    f.write(raw_bytes)
+async def voice_process(file: UploadFile = File(...), history: str = Form("[]")):
+    raw_bytes = await file.read()
+    temp_in = f"in_{uuid.uuid4().hex[:8]}.wav"
+    with open(temp_in, "wb") as f:
+        f.write(raw_bytes)
 
-  user_text = ""
-  if client:
-    try:
-      with open(temp_in, "rb") as f:
-        tx = client.audio.transcriptions.create(
-            model="whisper-large-v3", file=f, response_format="text"
-        )
-        user_text = str(tx).strip()
-    except Exception as e:
-      print("Transcription error:", e)
+    user_text = ""
+    if client:
+        try:
+            with open(temp_in, "rb") as f:
+                tx = client.audio.transcriptions.create(
+                    model="whisper-large-v3",
+                    file=f,
+                    response_format="text"
+                )
+                user_text = str(tx).strip()
+        except Exception as e:
+            print("Transcription error:", e)
 
-  if os.path.exists(temp_in):
-    try:
-      os.remove(temp_in)
-    except Exception:
-      pass
+    if os.path.exists(temp_in):
+        try:
+            os.remove(temp_in)
+        except Exception:
+            pass
 
-  clean_text = user_text
-  for w in [
-      "hi lemon",
-      "hey lemon",
-      "hello lemon",
-      "lemon",
-      "high level",
-      "hi level",
-  ]:
-    if clean_text.lower().startswith(w):
-      clean_text = clean_text[len(w) :].strip()
+    clean_text = user_text
+    for w in ["hi lemon", "hey lemon", "hello lemon", "lemon", "high level", "hi level"]:
+        if clean_text.lower().startswith(w):
+            clean_text = clean_text[len(w):].strip()
 
-  reply_text, action, target = process_ai_dialogue(clean_text, history)
+    reply_text, action, target = process_ai_dialogue(clean_text, history)
 
-  # In-memory fast audio generation
-  tts = gTTS(text=reply_text, lang="en", slow=False)
-  fp = io.BytesIO()
-  tts.write_to_fp(fp)
-  fp.seek(0)
-  audio_b64 = base64.b64encode(fp.read()).decode("utf-8")
+    # Audio synthesis
+    tts = gTTS(text=reply_text, lang='en', slow=False)
+    fp = io.BytesIO()
+    tts.write_to_fp(fp)
+    fp.seek(0)
+    audio_b64 = base64.b64encode(fp.read()).decode('utf-8')
 
-  return JSONResponse({
-      "user_text": user_text,
-      "reply_text": reply_text,
-      "audio_base64": f"data:audio/mp3;base64,{audio_b64}",
-      "action": action,
-      "action_target": target,
-  })
-
+    return JSONResponse({
+        "user_text": user_text,
+        "reply_text": reply_text,
+        "audio_base64": f"data:audio/mp3;base64,{audio_b64}",
+        "action": action,
+        "action_target": target
+    })
 
 @app.post("/text-process")
 async def text_process(text: str = Form(...), history: str = Form("[]")):
-  reply_text, action, target = process_ai_dialogue(text.strip(), history)
+    reply_text, action, target = process_ai_dialogue(text.strip(), history)
 
-  tts = gTTS(text=reply_text, lang="en", slow=False)
-  fp = io.BytesIO()
-  tts.write_to_fp(fp)
-  fp.seek(0)
-  audio_b64 = base64.b64encode(fp.read()).decode("utf-8")
+    tts = gTTS(text=reply_text, lang='en', slow=False)
+    fp = io.BytesIO()
+    tts.write_to_fp(fp)
+    fp.seek(0)
+    audio_b64 = base64.b64encode(fp.read()).decode('utf-8')
 
-  return JSONResponse({
-      "user_text": text,
-      "reply_text": reply_text,
-      "audio_base64": f"data:audio/mp3;base64,{audio_b64}",
-      "action": action,
-      "action_target": target,
-  })
-
+    return JSONResponse({
+        "user_text": text,
+        "reply_text": reply_text,
+        "audio_base64": f"data:audio/mp3;base64,{audio_b64}",
+        "action": action,
+        "action_target": target
+    })
 
 @app.get("/", response_class=HTMLResponse)
 async def serve_app():
-  return """
+    return """
     <!DOCTYPE html>
     <html lang="en">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-        <title>Lemon AI - Adaptive Voice Companion</title>
+        <title>Lemon AI - Expressive Companion</title>
         <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
         <style>
             :root {
@@ -260,7 +236,6 @@ async def serve_app():
                 background: radial-gradient(circle at 50% 10%, #1e1b4b 0%, var(--bg-dark) 65%);
                 color: #f8fafc; height: 100vh; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden;
             }
-            /* Header */
             .header { padding: 14px 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-glass); backdrop-filter: blur(14px); }
             .brand { display: flex; align-items: center; gap: 10px; }
             .brand-logo { width: 36px; height: 36px; background: linear-gradient(135deg, #facc15, #f59e0b); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 20px; box-shadow: 0 4px 14px var(--primary-glow); }
@@ -269,16 +244,14 @@ async def serve_app():
             .dot { width: 6px; height: 6px; background: #4ade80; border-radius: 50%; animation: pulseDot 2s infinite; }
             @keyframes pulseDot { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 
-            /* Chat Stream */
-            .chat-container { flex: 1; overflow-y: auto; padding: 18px 16px; display: flex; flex-direction: column; gap: 12px; scroll-behavior: smooth; }
+            .chat-container { flex: 1; overflow-y: auto; padding: 18px 16px; display: flex; flex-direction: column; gap: 14px; scroll-behavior: smooth; }
             .chat-container::-webkit-scrollbar { display: none; }
-            .bubble { max-width: 82%; padding: 12px 16px; border-radius: 18px; font-size: 14px; line-height: 1.45; animation: enterBubble 0.25s ease-out; }
+            .bubble { max-width: 85%; padding: 14px 18px; border-radius: 18px; font-size: 14.5px; line-height: 1.55; animation: enterBubble 0.25s ease-out; }
             @keyframes enterBubble { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-            .bubble.lemon { align-self: flex-start; background: var(--card-bg); backdrop-filter: blur(12px); border: 1px solid var(--border-glass); color: #f1f5f9; border-bottom-left-radius: 4px; }
+            .bubble.lemon { align-self: flex-start; background: var(--card-bg); backdrop-filter: blur(12px); border: 1px solid var(--border-glass); color: #f1f5f9; border-bottom-left-radius: 4px; white-space: pre-wrap; }
             .bubble.lemon b { color: var(--primary); }
             .bubble.user { align-self: flex-end; background: linear-gradient(135deg, #facc15, #f59e0b); color: #0b1120; font-weight: 500; border-bottom-right-radius: 4px; box-shadow: 0 4px 16px var(--primary-glow); }
 
-            /* Voice Section & Canvas Visualizer */
             .voice-section { display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; padding: 10px 0 14px; }
             #visualizer { position: absolute; width: 220px; height: 100px; pointer-events: none; }
             .orb-btn { width: 78px; height: 78px; border-radius: 50%; background: linear-gradient(135deg, #fde047 0%, #eab308 50%, #ca8a04 100%); border: none; display: flex; align-items: center; justify-content: center; font-size: 32px; cursor: pointer; box-shadow: 0 0 24px var(--primary-glow); transition: transform 0.2s; z-index: 2; }
@@ -287,7 +260,6 @@ async def serve_app():
             @keyframes orbPulse { from { box-shadow: 0 0 20px var(--primary-glow); } to { box-shadow: 0 0 46px rgba(250, 204, 21, 0.95); } }
             .status-label { font-size: 13px; font-weight: 500; color: #94a3b8; margin-top: 10px; }
 
-            /* Bottom Bar */
             .bottom-bar { padding: 10px 16px 22px; backdrop-filter: blur(16px); background: rgba(10, 14, 26, 0.7); border-top: 1px solid var(--border-glass); }
             .input-wrapper { display: flex; align-items: center; background: rgba(28, 38, 58, 0.8); border: 1px solid var(--border-glass); border-radius: 28px; padding: 5px 6px 5px 18px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4); }
             .input-wrapper input { flex: 1; background: transparent; border: none; color: #fff; font-size: 14.5px; outline: none; }
@@ -299,24 +271,24 @@ async def serve_app():
         <div class="header">
             <div class="brand">
                 <div class="brand-logo">🍋</div>
-                <div class="brand-title">Lemon Evolving Voice</div>
+                <div class="brand-title">Lemon Voice</div>
             </div>
             <div class="badge-live">
                 <span class="dot"></span>
-                <span id="memoryBadge">Memory Active</span>
+                <span>Active & Learning</span>
             </div>
         </div>
 
         <div class="chat-container" id="chatStream">
             <div class="bubble lemon">
-                Hello! I am <b>Lemon</b>. I remember our conversations and evolve with you. Ask me anything or tell me to play a song!
+                Hello! I am <b>Lemon</b>. I am fully expressive, adaptive, and here to talk deeply with you. Ask me anything, discuss complex ideas, or ask for recommendations!
             </div>
         </div>
 
         <div class="voice-section" id="voiceSection">
             <canvas id="visualizer"></canvas>
             <button class="orb-btn" id="orbBtn" onclick="toggleVoice()">🎙️</button>
-            <div class="status-label" id="statusLabel">Tap mic to talk hands-free</div>
+            <div class="status-label" id="statusLabel">Tap mic to speak freely</div>
         </div>
 
         <div class="bottom-bar">
@@ -353,10 +325,9 @@ async def serve_app():
                 chatStream.appendChild(b);
                 chatStream.scrollTop = chatStream.scrollHeight;
                 conversationHistory.push({ role: role === "user" ? "user" : "assistant", text: text });
-                if (conversationHistory.length > 8) conversationHistory.shift();
+                if (conversationHistory.length > 12) conversationHistory.shift();
             }
 
-            // Real-Time Audio Visualizer & Voice Activity Silence Detection
             function setupVisualizer(stream) {
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 analyser = audioContext.createAnalyser();
@@ -375,20 +346,17 @@ async def serve_app():
                     analyser.getByteFrequencyData(dataArray);
                     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-                    // Check sound volume for silence auto-stop
                     let sum = 0;
                     for (let i = 0; i < bufferLength; i++) sum += dataArray[i];
                     let average = sum / bufferLength;
 
-                    // If user was speaking and now silent for 1.4s, auto submit
                     if (average > 15) {
                         clearTimeout(silenceTimer);
                         silenceTimer = setTimeout(() => {
                             if (isRecording) stopRecordingAndSend();
-                        }, 1400);
+                        }, 1800);
                     }
 
-                    // Render wave
                     ctx.fillStyle = "rgba(250, 204, 21, 0.4)";
                     let barWidth = (canvas.width / bufferLength) * 2;
                     let x = 0;
@@ -418,7 +386,7 @@ async def serve_app():
                             const blob = new Blob(audioChunks, { type: 'audio/wav' });
                             stream.getTracks().forEach(t => t.stop());
                             if (audioContext) audioContext.close();
-                            statusLabel.innerText = "Lemon is processing...";
+                            statusLabel.innerText = "Lemon is thinking...";
                             sendAudioToServer(blob);
                         };
 
@@ -439,7 +407,7 @@ async def serve_app():
                 if (!isRecording) return;
                 isRecording = false;
                 voiceSection.classList.remove("listening");
-                statusLabel.innerText = "Finalizing thought...";
+                statusLabel.innerText = "Thinking...";
                 clearTimeout(silenceTimer);
                 if (mediaRecorder && mediaRecorder.state !== "inactive") mediaRecorder.stop();
             }
@@ -455,7 +423,7 @@ async def serve_app():
                     
                     if (data.user_text) addBubble("user", data.user_text);
                     addBubble("lemon", data.reply_text);
-                    statusLabel.innerText = "Tap mic to talk hands-free";
+                    statusLabel.innerText = "Tap mic to speak freely";
 
                     if (data.action === "youtube" && data.action_target) {
                         window.open(data.action_target, '_blank');
@@ -487,7 +455,7 @@ async def serve_app():
                     const data = await res.json();
                     
                     addBubble("lemon", data.reply_text);
-                    statusLabel.innerText = "Tap mic to talk hands-free";
+                    statusLabel.innerText = "Tap mic to speak freely";
 
                     if (data.action === "youtube" && data.action_target) {
                         window.open(data.action_target, '_blank');
@@ -504,11 +472,9 @@ async def serve_app():
         </script>
     </body>
     </html>
-  """
-
+    """
 
 if __name__ == "__main__":
-  import uvicorn
-
-  port = int(os.environ.get("PORT", 10000))
-  uvicorn.run("app:app", host="0.0.0.0", port=port, reload=False)
+    import uvicorn
+    port = int(os.environ.get("PORT", 10000))
+    uvicorn.run("app:app", host="0.0.0.0", port=port, reload=False)
