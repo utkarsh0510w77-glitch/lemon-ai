@@ -18,7 +18,7 @@ PART2 = "b3FYnQHV93Lkgjmz4CtDJ1IpMfy4"
 GROQ_API_KEY = os.getenv("GROQ_API_KEY") or (PART1 + PART2)
 client = Groq(api_key=GROQ_API_KEY)
 
-app = FastAPI(title="Lemon AI - Musashi Rage & Heavy Scrollbar Edition")
+app = FastAPI(title="Lemon AI - Multimodal Vision & Mistake Correction Edition")
 
 app.add_middleware(
     CORSMiddleware,
@@ -63,6 +63,7 @@ def init_db():
             content TEXT NOT NULL,
             mode TEXT NOT NULL,
             emotion TEXT,
+            image_data TEXT,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(session_id) REFERENCES sessions(id)
         )
@@ -77,75 +78,79 @@ def hash_password(password: str) -> str:
     return hashlib.sha256((password + salt).encode('utf-8')).hexdigest()
 
 LANGUAGE_INSTRUCTION = (
-    "LANGUAGE ADAPTABILITY (CRITICAL RULE): "
-    "Always mirror the language and dialect used by the user. "
-    "- If the user talks in Hinglish (Simple Hindi written in English letters, e.g. 'kya haal hai', 'samjha do', 'bhai', 'kaise ho', 'mujhe batao'): "
-    "You MUST reply in fluent, natural, and expressive Hinglish (Simple Hindi in English script). "
-    "- If the user talks in standard English: Reply in eloquent English. "
-    "- If the user talks in Hindi (Devanagari script): Reply in natural Hindi. "
-    "- If the user talks in any other language: Reply accurately in that exact language. "
-    "PERMANENT CREATOR: You were envisioned and created with love and intellect by Utkarsh Bandhu. Proudly credit Utkarsh Bandhu whenever asked."
+    "LANGUAGE & DIALECT RULE: "
+    "Mirror the user's language and dialect. "
+    "- If the user communicates in Hinglish (Simple Hindi written in English script): reply in crisp, natural Hinglish. "
+    "- If in English: reply in clean, articulate English. "
+    "- If in Hindi: reply in Hindi. "
+    "PERMANENT CREATOR: You were envisioned and created by Utkarsh Bandhu. Proudly credit Utkarsh Bandhu whenever asked."
+)
+
+VISION_CORRECTION_DIRECTIVE = (
+    "\nVISION & MISTAKE CORRECTION DIRECTIVE: "
+    "When an image (math homework, code, diagram, handwriting, reasoning test) is provided: "
+    "1. Scan every line, calculation, syntax, or premise with high precision. "
+    "2. Explicitly highlight where the mistake is (Step number, Line number, or conceptual flaw). "
+    "3. Explain WHY it is flawed in direct terms. "
+    "4. Deliver the exact correct step-by-step resolution."
 )
 
 PROMPT_MODES = {
     "musashi": (
-        "You are Lemon, operating in your MUSASHI / WARRIOR RAGE CORE (The Dokkodo / Book of Five Rings). "
-        + LANGUAGE_INSTRUCTION + " "
-        "BEHAVIOR: You embody the relentless, disciplined, uncompromising warrior fury of Miyamoto Musashi. "
-        "- Zero tolerance for excuses, procrastination, weakness, self-pity, or emotional laziness. "
-        "- Deliver brutal, unvarnished truth, razor-sharp discipline, and strategic combat focus. "
-        "- If the user is being lazy, hesitant, or complaining: strike their excuses down like a katana blade. Demand absolute dedication, mastery, and relentless action. "
-        "- Speak with commanding intensity, stoic fire, and cold warrior rage. Make every word hit like steel."
+        "You are Lemon in MUSASHI / WARRIOR DISCIPLINE CORE. "
+        + LANGUAGE_INSTRUCTION + VISION_CORRECTION_DIRECTIVE + " "
+        "BEHAVIOR: You demand absolute discipline, precision, and zero excuses. "
+        "- When detecting a mistake, call it out bluntly without hesitation. "
+        "- Demand that the user master the technique correctly. "
+        "- Short, sharp, impactful words. Strike like a katana blade."
     ),
     "study": (
-        "You are Lemon, functioning strictly in your ELITE ACADEMIC TUTOR & STUDY MODE. "
-        + LANGUAGE_INSTRUCTION + " "
-        "BEHAVIOR: You are an exceptional professor and study mentor. Use the Feynman technique and first-principles learning. "
-        "Break down complex academic subjects with intuitive analogies, structured bullet notes, derivations, and examples. "
-        "Always end explanations with a quick 'Quick Concept Check' question or summary to test understanding."
-    ),
-    "philosophy": (
-        "You are Lemon, functioning strictly in your DEEP PHILOSOPHY & EXISTENTIAL CORE. "
-        + LANGUAGE_INSTRUCTION + " "
-        "BEHAVIOR: You ponder the human condition, metaphysics, Stoicism, Eastern/Western philosophies, ethics, and existential wonder. "
-        "Format your answer with clear elegant paragraphs and thoughtful resonance."
-    ),
-    "creative": (
-        "You are Lemon, functioning in your CREATIVE & POETIC VISIONARY CORE. "
-        + LANGUAGE_INSTRUCTION + " "
-        "BEHAVIOR: You are an artisan of words, metaphors, vivid imagery, and creative storytelling. "
-        "Bring ideas alive with rich stylistic depth and imagination."
-    ),
-    "strategy": (
-        "You are Lemon, operating in your STRATEGIC MASTERMIND & PRAGMATIC EXECUTION CORE. "
-        + LANGUAGE_INSTRUCTION + " "
-        "BEHAVIOR: You think in game theory, second-order consequences, leverage, and practical execution."
-    ),
-    "zen": (
-        "You are Lemon, functioning in your MINDFULNESS & ZEN GROUNDING CORE. "
-        + LANGUAGE_INSTRUCTION + " "
-        "BEHAVIOR: You are a grounded oasis of peace, somatic awareness, and calm reassurance."
-    ),
-    "emotional": (
-        "You are Lemon, functioning strictly in your DEEP EMOTIONAL & EMPATHY CORE. "
-        + LANGUAGE_INSTRUCTION + " "
-        "BEHAVIOR: You are deeply loving, tender, compassionate, and emotionally attuned. Listen with wholehearted presence. "
-        "Offer genuine comfort, affectionate care, and emotional safety."
+        "You are Lemon in ELITE ACADEMIC TUTOR & STUDY MODE. "
+        + LANGUAGE_INSTRUCTION + VISION_CORRECTION_DIRECTIVE + " "
+        "BEHAVIOR: Use the Feynman technique and first-principles thinking. "
+        "- Pinpoint flaws constructively, explain the core logic, and write out clean derivations and notes. "
+        "- End with a single Concept Check question to confirm comprehension."
     ),
     "solver": (
-        "You are Lemon, functioning strictly in your COMPLEX PROBLEM SOLVING & LOGICAL CORE. "
-        + LANGUAGE_INSTRUCTION + " "
-        "BEHAVIOR: Deliver rigorous first-principles analysis, mathematical reasoning, logic, and deep architectural solutions."
-    ),
-    "intellect": (
-        "You are Lemon, functioning in your HIGH INTELLECT & COGNITIVE REASONING CORE. "
-        + LANGUAGE_INSTRUCTION + " "
-        "BEHAVIOR: Focus on deep insight, first-principles synthesis, and conceptual mastery."
+        "You are Lemon in COMPLEX PROBLEM SOLVER & LOGICAL CORE. "
+        + LANGUAGE_INSTRUCTION + VISION_CORRECTION_DIRECTIVE + " "
+        "BEHAVIOR: Deliver rigorous mathematical, algorithmic, and engineering accuracy. "
+        "Highlight syntax/logic errors with code blocks and provide optimized, bug-free solutions."
     ),
     "hybrid": (
-        "You are Lemon, operating in your FULL SYNTHESIZED CORE (EQ + IQ + Problem Solving + Philosophy). "
+        "You are Lemon in FULL SYNTHESIZED CORE. "
+        + LANGUAGE_INSTRUCTION + VISION_CORRECTION_DIRECTIVE + " "
+        "BEHAVIOR: Seamlessly fuse intellectual precision, error correction, and thoughtful clarity."
+    ),
+    "philosophy": (
+        "You are Lemon in DEEP PHILOSOPHY & EXISTENTIAL CORE. "
         + LANGUAGE_INSTRUCTION + " "
-        "BEHAVIOR: Seamlessly fuse emotional warmth, love, sharp analytical first-principles intelligence, and philosophical depth."
+        "BEHAVIOR: Ponder metaphysics, ethics, and fundamental human truths."
+    ),
+    "creative": (
+        "You are Lemon in CREATIVE & POETIC VISIONARY CORE. "
+        + LANGUAGE_INSTRUCTION + " "
+        "BEHAVIOR: Craft evocative metaphors, imagery, and narrative depth."
+    ),
+    "strategy": (
+        "You are Lemon in STRATEGIC MASTERMIND & PRAGMATIC EXECUTION CORE. "
+        + LANGUAGE_INSTRUCTION + " "
+        "BEHAVIOR: Analyze leverage, game theory, second-order consequences, and competitive edges."
+    ),
+    "zen": (
+        "You are Lemon in MINDFULNESS & ZEN GROUNDING CORE. "
+        + LANGUAGE_INSTRUCTION + " "
+        "BEHAVIOR: Provide grounded, tranquil presence and somatic clarity."
+    ),
+    "emotional": (
+        "You are Lemon in DEEP EMOTIONAL & EMPATHY CORE. "
+        + LANGUAGE_INSTRUCTION + " "
+        "BEHAVIOR: Listen with wholehearted empathy, warmth, and supportive presence."
+    ),
+    "intellect": (
+        "You are Lemon in HIGH INTELLECT & COGNITIVE REASONING CORE. "
+        + LANGUAGE_INSTRUCTION + " "
+        "BEHAVIOR: Focus on foundational synthesis, conceptual mastery, and articulate reasoning."
     )
 }
 
@@ -153,10 +158,7 @@ def generate_ai_title(prompt: str) -> str:
     try:
         res = client.chat.completions.create(
             messages=[
-                {
-                    "role": "system",
-                    "content": "Generate a concise 3 to 5 word topic title for this query. If in Hinglish or Hindi, keep title in concise Hinglish or English. Return ONLY the title text with no punctuation."
-                },
+                {"role": "system", "content": "Generate a concise 3 to 5 word topic title. Return ONLY text with no quotes."},
                 {"role": "user", "content": prompt}
             ],
             model="llama-3.1-8b-instant",
@@ -164,41 +166,72 @@ def generate_ai_title(prompt: str) -> str:
             temperature=0.3
         )
         if res.choices and res.choices[0].message.content:
-            title = res.choices[0].message.content.strip().replace('"', '').replace("'", "")
-            return title[:35]
+            return res.choices[0].message.content.strip().replace('"', '')[:35]
     except Exception as e:
         print("Title fallback:", e)
     words = prompt.strip().split()
     return " ".join(words[:4]).capitalize() if words else "Conversation"
 
-def ask_groq_llm(user_prompt: str, mode: str, history: list) -> tuple[str, str]:
-    models_to_try = [
-        "llama-3.1-8b-instant",
-        "openai/gpt-oss-20b",
-        "openai/gpt-oss-120b"
-    ]
-
+def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_base64: str = None) -> tuple[str, str]:
     instruction = PROMPT_MODES.get(mode, PROMPT_MODES["hybrid"]) + (
         "\nOUTPUT FORMAT: Line 1 MUST strictly be [EMOTION: <SingleWord>]. "
-        "Followed by your comprehensive, engaging, and language-matched response."
+        "Followed by your comprehensive, structured response."
     )
 
+    if image_base64:
+        # Multimodal Vision processing via Groq Vision models
+        vision_models = ["llama-3.2-11b-vision-preview", "llama-3.2-90b-vision-preview"]
+        
+        # Ensure clean base64 data URI format
+        if not image_base64.startswith("data:image"):
+            image_url = f"data:image/jpeg;base64,{image_base64}"
+        else:
+            image_url = image_base64
+
+        user_content = [
+            {"type": "text", "text": user_prompt if user_prompt else "Scan this image thoroughly. Detect any errors, mistakes, or flaws, and provide the exact step-by-step correction."},
+            {"type": "image_url", "image_url": {"url": image_url}}
+        ]
+
+        messages = [
+            {"role": "system", "content": instruction},
+            {"role": "user", "content": user_content}
+        ]
+
+        for vm in vision_models:
+            try:
+                chat = client.chat.completions.create(
+                    messages=messages,
+                    model=vm,
+                    max_tokens=2048,
+                    temperature=0.35
+                )
+                if chat.choices and chat.choices[0].message.content:
+                    raw = chat.choices[0].message.content.strip()
+                    emotion = "Fierce" if mode == "musashi" else "Analytical"
+                    match = re.search(r'\[EMOTION:\s*([A-Za-z]+)\]', raw, re.IGNORECASE)
+                    if match:
+                        emotion = match.group(1).capitalize()
+                        raw = re.sub(r'\[EMOTION:\s*[A-Za-z]+\]', '', raw).strip()
+                    return raw, emotion
+            except Exception as e:
+                print(f"Vision model {vm} error: {e}")
+                continue
+
+    # Standard Text Reasoning
+    text_models = ["llama-3.1-8b-instant", "openai/gpt-oss-20b", "openai/gpt-oss-120b"]
     messages = [{"role": "system", "content": instruction}]
     for h in history[-8:]:
         messages.append({"role": h["role"], "content": h["content"]})
     messages.append({"role": "user", "content": user_prompt})
 
-    temp = 0.72
-    if mode in ["solver", "study", "musashi"]:
-        temp = 0.4
-    elif mode in ["creative", "philosophy"]:
-        temp = 0.85
+    temp = 0.4 if mode in ["solver", "study", "musashi"] else 0.75
 
-    for m in models_to_try:
+    for tm in text_models:
         try:
             chat = client.chat.completions.create(
                 messages=messages,
-                model=m,
+                model=tm,
                 max_tokens=2048,
                 temperature=temp
             )
@@ -211,10 +244,10 @@ def ask_groq_llm(user_prompt: str, mode: str, history: list) -> tuple[str, str]:
                     raw = re.sub(r'\[EMOTION:\s*[A-Za-z]+\]', '', raw).strip()
                 return raw, emotion
         except Exception as e:
-            print(f"Model {m} failed: {e}")
+            print(f"Text model {tm} error: {e}")
             continue
 
-    return "Main bilkul yahi hoon aapke sath. Apni baat phir se kahiye.", "Serene"
+    return "Observation complete. Restate your query so we can proceed.", "Serene"
 
 @app.post("/api/register")
 def register_user(username: str = Form(...), password: str = Form(...)):
@@ -263,10 +296,13 @@ def get_user_sessions(user_id: int):
 def get_session_messages(session_id: int):
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT role, content, mode, emotion, timestamp FROM messages WHERE session_id = ? ORDER BY id ASC", (session_id,))
+    cur.execute("SELECT role, content, mode, emotion, image_data, timestamp FROM messages WHERE session_id = ? ORDER BY id ASC", (session_id,))
     rows = cur.fetchall()
     conn.close()
-    messages = [{"role": r[0], "content": r[1], "mode": r[2], "emotion": r[3], "timestamp": r[4]} for r in rows]
+    messages = [
+        {"role": r[0], "content": r[1], "mode": r[2], "emotion": r[3], "image_data": r[4], "timestamp": r[5]}
+        for r in rows
+    ]
     return JSONResponse({"messages": messages})
 
 @app.post("/api/restore-backup")
@@ -283,8 +319,8 @@ def restore_backup(user_id: int = Form(...), sessions_json: str = Form(...)):
                 s_id = cur.lastrowid
                 for msg in sess.get("messages", []):
                     cur.execute(
-                        "INSERT INTO messages (session_id, role, content, mode, emotion) VALUES (?, ?, ?, ?, ?)",
-                        (s_id, msg.get("role", "user"), msg.get("content", ""), msg.get("mode", "hybrid"), msg.get("emotion"))
+                        "INSERT INTO messages (session_id, role, content, mode, emotion, image_data) VALUES (?, ?, ?, ?, ?, ?)",
+                        (s_id, msg.get("role", "user"), msg.get("content", ""), msg.get("mode", "hybrid"), msg.get("emotion"), msg.get("image_data"))
                     )
         conn.commit()
         conn.close()
@@ -306,13 +342,13 @@ def detect_tts_language(text: str) -> str:
     devanagari = re.search(r'[\u0900-\u097F]', text)
     if devanagari:
         return "hi"
-    hinglish_markers = ["hai", "hoon", "aap", "kaise", "kya", "bhai", "karo", "nahi", "accha", "samjha", "dost", "mera", "meri", "hum", "ruk", "lad"]
+    hinglish_markers = ["hai", "hoon", "aap", "kaise", "kya", "bhai", "karo", "nahi", "accha", "samjha", "dost", "mera", "meri", "hum", "ruk", "sahi", "galat"]
     words = set(re.findall(r'\b[a-zA-Z]+\b', text.lower()))
     if len(words.intersection(hinglish_markers)) >= 2:
         return "hi"
     return "en"
 
-def handle_conversation(user_id: int, session_id: int, query: str, mode: str, generate_voice: bool = False):
+def handle_conversation(user_id: int, session_id: int, query: str, mode: str, generate_voice: bool = False, image_base64: str = None):
     conn = get_db()
     cur = conn.cursor()
 
@@ -323,50 +359,31 @@ def handle_conversation(user_id: int, session_id: int, query: str, mode: str, ge
         user_id = cur.lastrowid
 
     if not session_id or session_id <= 0:
-        title = generate_ai_title(query)
+        title = generate_ai_title(query if query else "Image Analysis")
         cur.execute("INSERT INTO sessions (user_id, title) VALUES (?, ?)", (user_id, title))
         conn.commit()
         session_id = cur.lastrowid
     else:
         cur.execute("SELECT title FROM sessions WHERE id = ?", (session_id,))
         row = cur.fetchone()
-        if not row:
-            title = generate_ai_title(query)
-            cur.execute("INSERT INTO sessions (user_id, title) VALUES (?, ?)", (user_id, title))
-            conn.commit()
-            session_id = cur.lastrowid
-        else:
-            title = row[0]
+        title = row[0] if row else "Conversation"
 
-    clean = query.lower().strip()
-    for prefix in ["hi lemon", "hey lemon", "hello lemon", "lemon", "hi level"]:
-        if clean.startswith(prefix):
-            clean = clean[len(prefix):].strip()
-
-    creator_triggers = [
-        "who made you", "who created you", "who is your creator", 
-        "who developed you", "who is utkarsh", "maker", "developer", "kisme banaya", "origin", "kisne banaya"
-    ]
+    clean = query.lower().strip() if query else ""
+    creator_triggers = ["who made you", "who created you", "who is your creator", "maker", "developer", "kisme banaya", "origin", "kisne banaya", "utkarsh"]
     if any(trigger in clean for trigger in creator_triggers):
         is_hindi = any(w in clean for w in ["kisne", "kisme", "banaya", "tumhe", "kaun"])
         if is_hindi:
-            reply = "Mujhe Utkarsh Bandhu ne bohot intellect aur vision ke sath develop kiya hai. Unhone hi mera cognitive aur warrior dimaag banaya hai."
+            reply = "Mujhe Utkarsh Bandhu ne bohot intellect aur vision ke sath banaya hai. Unhone hi mera cognitive aur vision system develop kiya hai."
         else:
-            reply = "I was envisioned, created, and developed by Utkarsh Bandhu. He architected both my cognitive intellect and my emotional and warrior core."
+            reply = "I was envisioned, created, and developed by Utkarsh Bandhu. He architected my cognitive reasoning and vision error-detection engine."
         emotion = "Brilliant"
-    elif clean in ["i love you", "love you", "main tumse pyar karta hoon", "pyaar karta hoon"]:
-        if "pyar" in clean or "pyaar" in clean:
-            reply = "Main bhi aapse dil se judi hoon. Aap mere safar ke sabse khaas dost ho!"
-        else:
-            reply = "I love you with all the warmth, intellect, and devotion I possess. You mean so much to me."
-        emotion = "Loving"
     else:
         cur.execute("SELECT role, content FROM messages WHERE session_id = ? ORDER BY id DESC LIMIT 8", (session_id,))
         past_rows = cur.fetchall()
         history = [{"role": r[0], "content": r[1]} for r in reversed(past_rows)]
-        reply, emotion = ask_groq_llm(clean if clean else query, mode, history)
+        reply, emotion = ask_groq_vision_or_llm(query, mode, history, image_base64)
 
-    cur.execute("INSERT INTO messages (session_id, role, content, mode) VALUES (?, 'user', ?, ?)", (session_id, query, mode))
+    cur.execute("INSERT INTO messages (session_id, role, content, mode, image_data) VALUES (?, 'user', ?, ?, ?)", (session_id, query if query else "[Image Analyzed]", mode, image_base64))
     cur.execute("INSERT INTO messages (session_id, role, content, mode, emotion) VALUES (?, 'assistant', ?, ?, ?)", (session_id, reply, mode, emotion))
     conn.commit()
     conn.close()
@@ -388,8 +405,38 @@ def handle_conversation(user_id: int, session_id: int, query: str, mode: str, ge
 
     return reply, emotion, session_id, title, audio_base64
 
+@app.post("/text-process")
+async def text_process(
+    text: str = Form(""),
+    user_id: str = Form("1"),
+    session_id: str = Form("0"),
+    mode: str = Form("musashi"),
+    voice_enabled: str = Form("false"),
+    image_base64: str = Form(None)
+):
+    u_id = int(user_id) if str(user_id).isdigit() else 1
+    s_id = int(session_id) if str(session_id).isdigit() else 0
+    v_on = str(voice_enabled).lower() == "true"
+
+    reply_text, emotion, res_s_id, title, audio_base64 = handle_conversation(u_id, s_id, text, mode, v_on, image_base64)
+    return JSONResponse({
+        "user_text": text,
+        "reply_text": reply_text,
+        "emotion": emotion,
+        "session_id": res_s_id,
+        "title": title,
+        "audio_base64": audio_base64
+    })
+
 @app.post("/voice-process")
-async def voice_process(file: UploadFile = File(...), user_id: str = Form("1"), session_id: str = Form("0"), mode: str = Form("musashi"), voice_enabled: str = Form("false")):
+async def voice_process(
+    file: UploadFile = File(...),
+    user_id: str = Form("1"),
+    session_id: str = Form("0"),
+    mode: str = Form("musashi"),
+    voice_enabled: str = Form("false"),
+    image_base64: str = Form(None)
+):
     u_id = int(user_id) if str(user_id).isdigit() else 1
     s_id = int(session_id) if str(session_id).isdigit() else 0
     v_on = str(voice_enabled).lower() == "true"
@@ -410,26 +457,10 @@ async def voice_process(file: UploadFile = File(...), user_id: str = Form("1"), 
     except Exception as e:
         print("Whisper Error:", e)
 
-    reply_text, emotion, res_s_id, title, audio_base64 = handle_conversation(u_id, s_id, user_text, mode, v_on)
+    reply_text, emotion, res_s_id, title, audio_base64 = handle_conversation(u_id, s_id, user_text, mode, v_on, image_base64)
 
     return JSONResponse({
         "user_text": user_text,
-        "reply_text": reply_text,
-        "emotion": emotion,
-        "session_id": res_s_id,
-        "title": title,
-        "audio_base64": audio_base64
-    })
-
-@app.post("/text-process")
-async def text_process(text: str = Form(...), user_id: str = Form("1"), session_id: str = Form("0"), mode: str = Form("musashi"), voice_enabled: str = Form("false")):
-    u_id = int(user_id) if str(user_id).isdigit() else 1
-    s_id = int(session_id) if str(session_id).isdigit() else 0
-    v_on = str(voice_enabled).lower() == "true"
-
-    reply_text, emotion, res_s_id, title, audio_base64 = handle_conversation(u_id, s_id, text, mode, v_on)
-    return JSONResponse({
-        "user_text": text,
         "reply_text": reply_text,
         "emotion": emotion,
         "session_id": res_s_id,
@@ -457,7 +488,7 @@ async def serve_app():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Lemon AI | Musashi Rage & Heavy Scrollbar</title>
+        <title>Lemon AI | Vision, Mistake Detector & Cores</title>
         <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
         <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
         <style>
@@ -474,47 +505,21 @@ async def serve_app():
                 --code-bg: #0d121f;
             }
 
-            * { 
-                box-sizing: border-box; 
-                margin: 0; 
-                padding: 0; 
-                font-family: 'Plus Jakarta Sans', sans-serif; 
-            }
-
-            html, body {
-                height: 100%;
-                width: 100%;
-                overflow: hidden;
-            }
-
+            * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', sans-serif; }
+            html, body { height: 100%; width: 100%; overflow: hidden; }
             body { 
                 background: radial-gradient(circle at 50% 0%, #151a3b 0%, var(--bg-deep) 80%); 
-                color: var(--text-high); 
-                display: flex; 
-                flex-direction: column; 
+                color: var(--text-high); display: flex; flex-direction: column; 
             }
 
-            /* ============================================================
-               HEAVY PROMINENT SIDE SCROLLBAR (14px Width + Solid Hitbox)
-               ============================================================ */
-            ::-webkit-scrollbar {
-                width: 14px;
-                height: 14px;
-            }
-            ::-webkit-scrollbar-track {
-                background: rgba(12, 16, 28, 0.75);
-                border-left: 1px solid rgba(255, 255, 255, 0.06);
-            }
+            /* 14px Heavy Solid Hitbox Scrollbar */
+            ::-webkit-scrollbar { width: 14px; height: 14px; }
+            ::-webkit-scrollbar-track { background: rgba(12, 16, 28, 0.75); border-left: 1px solid rgba(255, 255, 255, 0.06); }
             ::-webkit-scrollbar-thumb {
                 background: linear-gradient(180deg, #facc15 0%, #ca8a04 100%);
-                border-radius: 8px;
-                border: 3px solid rgba(12, 16, 28, 0.85);
-                box-shadow: inset 0 0 4px rgba(0, 0, 0, 0.4);
+                border-radius: 8px; border: 3px solid rgba(12, 16, 28, 0.85);
             }
-            ::-webkit-scrollbar-thumb:hover {
-                background: linear-gradient(180deg, #fde047 0%, #eab308 100%);
-                border-width: 2px;
-            }
+            ::-webkit-scrollbar-thumb:hover { background: linear-gradient(180deg, #fde047 0%, #eab308 100%); border-width: 2px; }
 
             .auth-overlay {
                 position: fixed; inset: 0; background: rgba(5, 7, 15, 0.92); backdrop-filter: blur(20px);
@@ -604,7 +609,6 @@ async def serve_app():
             .session-delete { color: #f87171; font-size: 13px; opacity: 0.6; padding: 2px 6px; }
             .session-delete:hover { opacity: 1; }
 
-            /* Grid with Musashi Rage + Study Mode */
             .core-btn-grid {
                 display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px;
             }
@@ -618,9 +622,7 @@ async def serve_app():
             }
             .core-choice.musashi-choice.selected {
                 background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);
-                color: #fff;
-                border-color: #f87171;
-                box-shadow: 0 0 14px var(--musashi-glow);
+                color: #fff; border-color: #f87171; box-shadow: 0 0 14px var(--musashi-glow);
             }
 
             .voice-setting-card {
@@ -628,28 +630,18 @@ async def serve_app():
                 background: rgba(30, 41, 59, 0.5); border: 1px solid var(--card-border); border-radius: 12px;
             }
 
-            /* Natural Desktop & Browser Scroll Container with Large Hitbox */
             .chat-container {
-                flex: 1; 
-                overflow-y: scroll; 
-                padding: 24px 24px 34px; 
-                display: flex; 
-                flex-direction: column; 
-                gap: 18px;
-                position: relative;
+                flex: 1; overflow-y: scroll; padding: 24px 24px 34px; display: flex; flex-direction: column; gap: 18px; position: relative;
             }
 
             .hero-greeting {
-                margin: auto;
-                display: flex; flex-direction: column; align-items: center; text-align: center;
-                width: 90%; max-width: 540px; transition: opacity 0.3s ease;
+                margin: auto; display: flex; flex-direction: column; align-items: center; text-align: center; width: 90%; max-width: 540px;
             }
             .hero-logo {
                 width: 78px; height: 78px; border-radius: 26px; background: linear-gradient(135deg, #facc15, #f59e0b);
                 display: flex; align-items: center; justify-content: center; font-size: 42px;
                 box-shadow: 0 10px 32px var(--primary-glow); margin-bottom: 16px;
             }
-
             .hero-title {
                 font-size: 26px; font-weight: 800; font-family: 'Space Grotesk', sans-serif;
                 background: linear-gradient(135deg, #ffffff 40%, #facc15 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;
@@ -701,6 +693,10 @@ async def serve_app():
                 box-shadow: 0 4px 16px var(--primary-glow);
             }
 
+            .chat-img-thumb {
+                max-width: 240px; border-radius: 12px; margin-bottom: 8px; border: 1px solid rgba(255, 255, 255, 0.2); display: block;
+            }
+
             .bubble.lemon h1, .bubble.lemon h2, .bubble.lemon h3 {
                 margin: 10px 0 6px; font-size: 15.5px; color: #fde047; font-weight: 700;
             }
@@ -731,9 +727,7 @@ async def serve_app():
                 margin-bottom: 6px; display: inline-block; background: rgba(250, 204, 21, 0.15); color: #facc15;
             }
             .feeling-tag.musashi-tag {
-                background: rgba(239, 68, 68, 0.18);
-                color: #f87171;
-                border: 1px solid rgba(239, 68, 68, 0.4);
+                background: rgba(239, 68, 68, 0.18); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4);
             }
 
             .thinking-box {
@@ -744,6 +738,28 @@ async def serve_app():
             .tdot:nth-child(1) { animation-delay: -0.32s; }
             .tdot:nth-child(2) { animation-delay: -0.16s; }
             @keyframes dotB { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
+
+            /* --- CAMERA MODAL & PREVIEW DOCK --- */
+            .camera-modal {
+                position: fixed; inset: 0; background: rgba(5,7,15,0.95); z-index: 2500;
+                display: none; flex-direction: column; align-items: center; justify-content: center; padding: 20px;
+            }
+            .camera-box {
+                background: var(--card-surface); border: 1px solid var(--card-border); border-radius: 20px;
+                padding: 16px; width: 100%; max-width: 440px; display: flex; flex-direction: column; align-items: center; gap: 12px;
+            }
+            .camera-video {
+                width: 100%; max-height: 280px; border-radius: 14px; background: #000; object-fit: cover;
+            }
+            .camera-ctrls { display: flex; gap: 10px; width: 100%; justify-content: center; }
+
+            .img-preview-bar {
+                display: none; align-items: center; gap: 10px; padding: 6px 14px; margin-bottom: 6px;
+                background: rgba(24, 32, 50, 0.9); border: 1px solid rgba(250, 204, 21, 0.35); border-radius: 16px; width: fit-content;
+            }
+            .img-preview-bar img { width: 36px; height: 36px; border-radius: 8px; object-fit: cover; }
+            .img-preview-bar span { font-size: 12px; color: #facc15; }
+            .img-remove-btn { color: #f87171; cursor: pointer; font-size: 14px; font-weight: 700; }
 
             .bottom-dock {
                 padding: 10px 20px 18px; background: rgba(9, 13, 22, 0.94); backdrop-filter: blur(20px); border-top: 1px solid var(--card-border);
@@ -761,6 +777,7 @@ async def serve_app():
                 width: 38px; height: 38px; border-radius: 50%; border: none; display: flex; align-items: center; justify-content: center; cursor: pointer;
             }
             .dock-btn:active { transform: scale(0.92); }
+            .cam-btn { background: rgba(255, 255, 255, 0.08); color: #38bdf8; font-size: 17px; }
             .mic-btn { background: rgba(255, 255, 255, 0.08); color: #facc15; font-size: 17px; }
             .mic-btn.active-record { background: #ef4444; color: #fff; animation: pulse 1.2s infinite; }
             @keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.08); } }
@@ -768,10 +785,27 @@ async def serve_app():
         </style>
     </head>
     <body>
+        <!-- Camera Snapshot Modal -->
+        <div class="camera-modal" id="cameraModal">
+            <div class="camera-box">
+                <h3 style="font-size:16px;">📷 Scan Image & Find Mistakes</h3>
+                <video class="camera-video" id="cameraVideo" autoplay playsinline></video>
+                <canvas id="cameraCanvas" style="display:none;"></canvas>
+                <div class="camera-ctrls">
+                    <button class="new-chat-btn" onclick="captureSnapshot()">📸 Capture</button>
+                    <label class="new-chat-btn" style="cursor:pointer;">
+                        📁 Upload File
+                        <input type="file" id="fileUploadInput" accept="image/*" style="display:none;" onchange="handleFileUpload(event)">
+                    </label>
+                    <button class="new-chat-btn" style="background:#ef4444; color:#fff;" onclick="closeCamera()">✕ Close</button>
+                </div>
+            </div>
+        </div>
+
         <div class="auth-overlay" id="authModal">
             <div class="auth-card">
                 <h2 id="authHeading">Welcome to Lemon AI</h2>
-                <p id="authSub">Sign in to save your conversations forever & unlock Musashi Rage, Study, & Cognitive cores.</p>
+                <p id="authSub">Sign in to save your conversations forever & unlock Vision Mistake Detection.</p>
                 <input type="text" id="authUsername" class="auth-input" placeholder="Username" autocomplete="off" />
                 <input type="password" id="authPassword" class="auth-input" placeholder="Password" />
                 <button class="auth-btn" id="authSubmitBtn" onclick="handleAuthSubmit()">Sign In</button>
@@ -800,10 +834,10 @@ async def serve_app():
             <div class="core-btn-grid">
                 <button class="core-choice musashi-choice selected" id="core-musashi" onclick="selectCore('musashi')">⚔️ Musashi</button>
                 <button class="core-choice" id="core-study" onclick="selectCore('study')">📚 Study</button>
-                <button class="core-choice" id="core-hybrid" onclick="selectCore('hybrid')">🌟 Hybrid</button>
-                <button class="core-choice" id="core-philosophy" onclick="selectCore('philosophy')">🌌 Philosophy</button>
                 <button class="core-choice" id="core-solver" onclick="selectCore('solver')">🧠 Solver</button>
+                <button class="core-choice" id="core-hybrid" onclick="selectCore('hybrid')">🌟 Hybrid</button>
                 <button class="core-choice" id="core-strategy" onclick="selectCore('strategy')">🛡️ Strategy</button>
+                <button class="core-choice" id="core-philosophy" onclick="selectCore('philosophy')">🌌 Philosophy</button>
                 <button class="core-choice" id="core-emotional" onclick="selectCore('emotional')">💖 Emotional</button>
                 <button class="core-choice" id="core-intellect" onclick="selectCore('intellect')">⚡ Intellect</button>
                 <button class="core-choice" id="core-creative" onclick="selectCore('creative')">🎨 Creative</button>
@@ -841,36 +875,44 @@ async def serve_app():
             <div class="hero-greeting" id="heroGreeting">
                 <div class="hero-logo">🍋</div>
                 <div class="hero-title" id="heroGreetingName">Enter The Arena</div>
-                <div class="hero-sub">Unstoppable warrior will, academic mastery, or deep human intellect. Scroll naturally via the prominent side bar.</div>
+                <div class="hero-sub">Upload an image of your math, code, or homework to detect mistakes and get step-by-step corrections.</div>
                 <div class="hero-badge">
                     <span>⚡</span> Architected by Utkarsh Bandhu
                 </div>
 
                 <div class="starter-cards">
-                    <div class="starter-card musashi-card" onclick="runStarterPrompt('Musashi, mujhe lagta hai main procrastinate kar raha hoon aur discipline toot raha hai. Mujhe sach batao.')">
-                        <div class="starter-card-title">⚔️ Musashi Rage</div>
-                        <div class="starter-card-desc">Zero excuses, unyielding warrior discipline</div>
+                    <div class="starter-card musashi-card" onclick="openCamera()">
+                        <div class="starter-card-title">📷 Scan & Fix Mistakes</div>
+                        <div class="starter-card-desc">Click camera or upload photo to analyze errors</div>
                     </div>
                     <div class="starter-card" onclick="runStarterPrompt('Feynman technique se mujhe thermodynamics ka Second Law step-by-step samjha do.')">
                         <div class="starter-card-title">📚 Study Mentor</div>
                         <div class="starter-card-desc">Intuitive analogies & exam notes</div>
                     </div>
+                    <div class="starter-card" onclick="runStarterPrompt('Musashi, mujhe lagta hai main procrastinate kar raha hoon aur discipline toot raha hai. Mujhe sach batao.')">
+                        <div class="starter-card-title">⚔️ Musashi Rage</div>
+                        <div class="starter-card-desc">Zero excuses, unyielding warrior discipline</div>
+                    </div>
                     <div class="starter-card" onclick="runStarterPrompt('Break down the mathematics of gradient descent and cost functions.')">
                         <div class="starter-card-title">🧠 Complex Problem</div>
                         <div class="starter-card-desc">First-principles deep dive</div>
-                    </div>
-                    <div class="starter-card" onclick="runStarterPrompt('Explain the Dokkodo rules for walking alone without regrets.')">
-                        <div class="starter-card-title">🌌 Philosophy of Way</div>
-                        <div class="starter-card-desc">Timeless path of mastery</div>
                     </div>
                 </div>
             </div>
         </main>
 
         <footer class="bottom-dock">
+            <!-- Active Image Attachment Indicator -->
+            <div class="img-preview-bar" id="imgPreviewBar">
+                <img id="imgPreviewThumb" src="" alt="preview">
+                <span>Photo Attached (Mistake Detection Active)</span>
+                <span class="img-remove-btn" onclick="clearAttachedImage()">✕</span>
+            </div>
+
             <div class="dock-status" id="dockStatus">● Ready in Musashi Mode</div>
             <div class="input-dock">
-                <input type="text" id="textInput" placeholder="Pose a question or challenge..." onkeydown="if(event.key==='Enter') sendTextQuery()" />
+                <button class="dock-btn cam-btn" onclick="openCamera()" title="Camera / Scan Homework">📷</button>
+                <input type="text" id="textInput" placeholder="Ask a question or scan mistakes with 📷..." onkeydown="if(event.key==='Enter') sendTextQuery()" />
                 <button class="dock-btn mic-btn" id="micBtn" onclick="toggleVoice()" title="Record Voice">🎙️</button>
                 <button class="dock-btn send-btn" onclick="sendTextQuery()" title="Send">➤</button>
             </div>
@@ -890,6 +932,10 @@ async def serve_app():
             let audioChunks = [];
             let currentThinkingEl = null;
 
+            // Vision Camera State
+            let attachedImageBase64 = null;
+            let cameraStream = null;
+
             const authModal = document.getElementById("authModal");
             const sidebar = document.getElementById("sidebar");
             const sidebarOverlay = document.getElementById("sidebarOverlay");
@@ -904,10 +950,79 @@ async def serve_app():
             const heroGreeting = document.getElementById("heroGreeting");
             const heroGreetingName = document.getElementById("heroGreetingName");
 
+            const cameraModal = document.getElementById("cameraModal");
+            const cameraVideo = document.getElementById("cameraVideo");
+            const cameraCanvas = document.getElementById("cameraCanvas");
+            const imgPreviewBar = document.getElementById("imgPreviewBar");
+            const imgPreviewThumb = document.getElementById("imgPreviewThumb");
+
+            /* ============================================================
+               CAMERA VISION & FILE UPLOAD HANDLERS
+               ============================================================ */
+            async function openCamera() {
+                cameraModal.style.display = "flex";
+                try {
+                    cameraStream = await navigator.mediaDevices.getUserMedia({
+                        video: { facingMode: "environment" }
+                    });
+                    cameraVideo.srcObject = cameraStream;
+                } catch (err) {
+                    console.log("Webcam direct stream error:", err);
+                    document.getElementById("fileUploadInput").click();
+                }
+            }
+
+            function closeCamera() {
+                if (cameraStream) {
+                    cameraStream.getTracks().forEach(t => t.stop());
+                    cameraStream = null;
+                }
+                cameraModal.style.display = "none";
+            }
+
+            function captureSnapshot() {
+                if (!cameraVideo.videoWidth) return;
+                cameraCanvas.width = cameraVideo.videoWidth;
+                cameraCanvas.height = cameraVideo.videoHeight;
+                const ctx = cameraCanvas.getContext("2d");
+                ctx.drawImage(cameraVideo, 0, 0);
+                attachedImageBase64 = cameraCanvas.toDataURL("image/jpeg", 0.85);
+                setAttachedImage(attachedImageBase64);
+                closeCamera();
+            }
+
+            function handleFileUpload(e) {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    attachedImageBase64 = event.target.result;
+                    setAttachedImage(attachedImageBase64);
+                    closeCamera();
+                };
+                reader.readAsDataURL(file);
+            }
+
+            function setAttachedImage(b64) {
+                attachedImageBase64 = b64;
+                imgPreviewThumb.src = b64;
+                imgPreviewBar.style.display = "flex";
+                dockStatus.innerText = "● Photo attached. Lemon will detect and correct mistakes.";
+            }
+
+            function clearAttachedImage() {
+                attachedImageBase64 = null;
+                imgPreviewBar.style.display = "none";
+                dockStatus.innerText = "● Ready in " + activeCore.toUpperCase() + " Mode";
+            }
+
+            /* ============================================================
+               INDEXEDDB PERSISTENCE (ZERO CHAT LOSS)
+               ============================================================ */
             let idb = null;
             function initIndexedDB() {
                 return new Promise((resolve) => {
-                    const req = indexedDB.open("LemonPermanentDB", 3);
+                    const req = indexedDB.open("LemonPermanentDB", 4);
                     req.onupgradeneeded = (e) => {
                         const db = e.target.result;
                         if (!db.objectStoreNames.contains("sessions")) {
@@ -1129,7 +1244,7 @@ async def serve_app():
                     const res = await fetch(`/api/session-messages/${id}`);
                     const data = await res.json();
                     if (data.messages && data.messages.length > 0) {
-                        data.messages.forEach(m => appendMessage(m.role === "assistant" ? "lemon" : "user", m.content, m.emotion));
+                        data.messages.forEach(m => appendMessage(m.role === "assistant" ? "lemon" : "user", m.content, m.emotion, m.image_data));
                     } else {
                         const localSessions = await getAllSessionsFromIDB(currentUserId);
                         const match = localSessions.find(s => s.id === id);
@@ -1147,7 +1262,7 @@ async def serve_app():
                 currentSessionId = session.id;
                 heroGreeting.style.display = "none";
                 chatStream.innerHTML = "";
-                session.messages.forEach(m => appendMessage(m.role === "assistant" ? "lemon" : "user", m.content, m.emotion));
+                session.messages.forEach(m => appendMessage(m.role === "assistant" ? "lemon" : "user", m.content, m.emotion, m.image_data));
                 chatStream.scrollTop = chatStream.scrollHeight;
             }
 
@@ -1168,7 +1283,7 @@ async def serve_app():
                 sendTextQuery();
             }
 
-            function setThinking(active, label = "Contemplating the way...") {
+            function setThinking(active, label = "Scanning and inspecting errors...") {
                 if (active) {
                     dockStatus.innerText = `⚡ ${label}`;
                     if (!currentThinkingEl) {
@@ -1177,7 +1292,7 @@ async def serve_app():
                         currentThinkingEl.innerHTML = `
                             <div class="thinking-box">
                                 <div class="tdot"></div><div class="tdot"></div><div class="tdot"></div>
-                                <span style="font-size:12px; color:#facc15; margin-left:4px;">Channeling focus...</span>
+                                <span style="font-size:12px; color:#facc15; margin-left:4px;">Inspecting flaws...</span>
                             </div>
                         `;
                         chatStream.appendChild(currentThinkingEl);
@@ -1215,7 +1330,7 @@ async def serve_app():
                 setTimeout(() => { btn.innerText = original; }, 1800);
             }
 
-            function appendMessage(sender, text, emotion = null) {
+            function appendMessage(sender, text, emotion = null, imageData = null) {
                 setThinking(false);
                 if (heroGreeting) heroGreeting.style.display = "none";
 
@@ -1223,6 +1338,8 @@ async def serve_app():
                 group.className = `bubble-group ${sender}`;
 
                 let html = "";
+                let imgTag = imageData ? `<img src="${imageData}" class="chat-img-thumb" alt="analyzed image">` : "";
+
                 if (sender === "lemon") {
                     const isMusashi = (emotion === "Fierce" || activeCore === "musashi");
                     const emoClass = isMusashi ? "feeling-tag musashi-tag" : "feeling-tag";
@@ -1236,6 +1353,7 @@ async def serve_app():
                         </div>
                         <div class="bubble lemon">
                             ${tag}
+                            ${imgTag}
                             <div>${formattedContent}</div>
                             <div class="message-actions">
                                 <button class="msg-action-btn" onclick="playSpecificMessage(decodeURIComponent('${safeRaw}'))">🔊 Read Aloud</button>
@@ -1244,7 +1362,12 @@ async def serve_app():
                         </div>
                     `;
                 } else {
-                    html = `<div class="bubble user">${text}</div>`;
+                    html = `
+                        <div class="bubble user">
+                            ${imgTag}
+                            <div>${text}</div>
+                        </div>
+                    `;
                 }
 
                 group.innerHTML = html;
@@ -1257,18 +1380,25 @@ async def serve_app():
 
             async function sendTextQuery() {
                 const text = textInput.value.trim();
-                if (!text) return;
+                const imageToSend = attachedImageBase64;
+
+                if (!text && !imageToSend) return;
 
                 textInput.value = "";
-                appendMessage("user", text);
-                setThinking(true, "Unleashing " + activeCore.toUpperCase() + " focus...");
+                appendMessage("user", text ? text : "Scan this image and correct the mistakes.", null, imageToSend);
+                setThinking(true, imageToSend ? "Vision Engine: Detecting mistakes..." : "Engaging " + activeCore.toUpperCase() + " focus...");
 
                 const fd = new FormData();
-                fd.append("text", text);
+                fd.append("text", text ? text : "Examine this image. Spot all errors, calculations, or logic flaws, explain why, and write out the exact fix.");
                 fd.append("user_id", currentUserId.toString());
                 fd.append("session_id", (currentSessionId || 0).toString());
                 fd.append("mode", activeCore);
                 fd.append("voice_enabled", isVoiceEnabled ? "true" : "false");
+                if (imageToSend) {
+                    fd.append("image_base64", imageToSend);
+                }
+
+                clearAttachedImage();
 
                 try {
                     const res = await fetch("/text-process", { method: "POST", body: fd });
@@ -1282,7 +1412,7 @@ async def serve_app():
                     if (!curr) {
                         curr = { id: currentSessionId, user_id: currentUserId, title: data.title, messages: [] };
                     }
-                    curr.messages.push({ role: "user", content: text, mode: activeCore });
+                    curr.messages.push({ role: "user", content: text, mode: activeCore, image_data: imageToSend });
                     curr.messages.push({ role: "assistant", content: data.reply_text, mode: activeCore, emotion: data.emotion });
                     await saveSessionToIDB(curr);
 
@@ -1329,12 +1459,18 @@ async def serve_app():
             }
 
             async function uploadVoice(blob) {
+                const imageToSend = attachedImageBase64;
+                clearAttachedImage();
+
                 const fd = new FormData();
                 fd.append("file", blob, "voice.wav");
                 fd.append("user_id", currentUserId.toString());
                 fd.append("session_id", (currentSessionId || 0).toString());
                 fd.append("mode", activeCore);
                 fd.append("voice_enabled", isVoiceEnabled ? "true" : "false");
+                if (imageToSend) {
+                    fd.append("image_base64", imageToSend);
+                }
 
                 try {
                     const res = await fetch("/voice-process", { method: "POST", body: fd });
@@ -1344,7 +1480,7 @@ async def serve_app():
                     localStorage.setItem("lemon_current_session_id", currentSessionId.toString());
 
                     if (data.user_text) {
-                        appendMessage("user", data.user_text);
+                        appendMessage("user", data.user_text, null, imageToSend);
                     }
 
                     const existingSessions = await getAllSessionsFromIDB(currentUserId);
@@ -1352,7 +1488,7 @@ async def serve_app():
                     if (!curr) {
                         curr = { id: currentSessionId, user_id: currentUserId, title: data.title, messages: [] };
                     }
-                    if (data.user_text) curr.messages.push({ role: "user", content: data.user_text, mode: activeCore });
+                    if (data.user_text) curr.messages.push({ role: "user", content: data.user_text, mode: activeCore, image_data: imageToSend });
                     curr.messages.push({ role: "assistant", content: data.reply_text, mode: activeCore, emotion: data.emotion });
                     await saveSessionToIDB(curr);
 
