@@ -27,72 +27,67 @@ class QueryPayload(BaseModel):
   query: str
 
 
+def clean_query(text: str) -> str:
+  # Filter common misheard wake-words like 'high level', 'hi lemon', 'lemon'
+  t = text.lower().strip()
+  for w in [
+      "hi lemon",
+      "hey lemon",
+      "hello lemon",
+      "lemon",
+      "high level",
+      "hi level",
+  ]:
+    if t.startswith(w):
+      t = t[len(w) :].strip()
+  return t
+
+
 def process_query_text(query: str) -> str:
-  if not query:
-    return "I didn't catch that. Could you please repeat?"
-
-  q_lower = query.lower().strip()
-
-  # Clean wake words
-  for wake in ["hi lemon", "hey lemon", "hello lemon", "lemon"]:
-    if q_lower.startswith(wake):
-      q_lower = q_lower[len(wake) :].strip()
-
-  if not q_lower:
-    return "Yes, I am listening. How can I help you?"
+  clean = clean_query(query)
+  if not clean:
+    return "Yes! I am Lemon. How can I help you?"
 
   # 1. Time query
-  if "time" in q_lower:
+  if "time" in clean:
     now = datetime.datetime.now()
     return f"The current time is {now.strftime('%I:%M %p')}."
 
-  # 2. Play song command
-  if q_lower.startswith("play "):
-    song = q_lower[5:].strip()
+  # 2. YouTube play query
+  if clean.startswith("play "):
+    song = clean[5:].strip()
     return f"Playing {song} on YouTube."
 
-  # 3. Groq LLM (llama-3.1-8b-instant)
+  # 3. Groq LLM with safety fallback
   if client:
-    try:
-      res = client.chat.completions.create(
-          messages=[
-              {
-                  "role": "system",
-                  "content": (
-                      "You are Lemon, a friendly and ultra-fast voice"
-                      " assistant. Always respond in only 1 or 2 concise,"
-                      " spoken-style sentences."
-                  ),
-              },
-              {"role": "user", "content": q_lower},
-          ],
-          model="llama-3.1-8b-instant",
-          max_tokens=70,
-          temperature=0.6,
-      )
-      return res.choices[0].message.content.strip()
-    except Exception as e:
-      return f"Sorry, could not process: {str(e)}"
+    for model_name in ["llama-3.1-8b-instant", "llama3-8b-8192"]:
+      try:
+        res = client.chat.completions.create(
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are Lemon, a witty and quick voice assistant."
+                        " Answer in 1 short spoken sentence."
+                    ),
+                },
+                {"role": "user", "content": clean},
+            ],
+            model=model_name,
+            max_tokens=60,
+            temperature=0.7,
+        )
+        return res.choices[0].message.content.strip()
+      except Exception:
+        continue
 
-  return f"You said: {q_lower}"
+  return f"I heard: {clean}."
 
 
 @app.post("/ask")
 async def ask_lemon(payload: QueryPayload):
   reply_text = process_query_text(payload.query)
-
-  # Generate Voice MP3
-  temp_file = "lemon_voice.mp3"
-  tts = gTTS(text=reply_text, lang="en", slow=False)
-  tts.save(temp_file)
-
-  with open(temp_file, "rb") as f:
-    audio_b64 = base64.b64encode(f.read()).decode("utf-8")
-
-  return JSONResponse({
-      "reply": reply_text,
-      "audio_base64": f"data:audio/mp3;base64,{audio_b64}",
-  })
+  return JSONResponse({"reply": reply_text})
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -103,17 +98,17 @@ async def serve_app():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>🍋 Lemon AI Assistant</title>
+        <title>🍋 Lemon Voice AI</title>
         <style>
             * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
             body { background: #0b1120; color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; text-align: center; padding: 16px; }
-            .card { max-width: 460px; width: 100%; background: #1e293b; border-radius: 20px; padding: 24px; box-shadow: 0 12px 32px rgba(0,0,0,0.4); border: 1px solid #334155; }
-            h1 { font-size: 26px; color: #facc15; margin-bottom: 4px; }
+            .card { max-width: 450px; width: 100%; background: #1e293b; border-radius: 20px; padding: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid #334155; }
+            h1 { font-size: 26px; color: #facc15; margin-bottom: 6px; }
             p.sub { font-size: 13px; color: #94a3b8; margin-bottom: 20px; }
             
-            .orb-wrapper { width: 100px; height: 100px; margin: 0 auto 16px; display: flex; align-items: center; justify-content: center; position: relative; }
+            .orb-box { width: 100px; height: 100px; margin: 0 auto 16px; display: flex; align-items: center; justify-content: center; }
             .orb { width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg, #facc15, #f59e0b); display: flex; align-items: center; justify-content: center; font-size: 34px; cursor: pointer; transition: transform 0.2s; box-shadow: 0 0 20px rgba(250, 204, 21, 0.4); }
-            .listening .orb { animation: pulse 1.4s infinite; box-shadow: 0 0 35px rgba(250, 204, 21, 0.8); }
+            .listening .orb { animation: pulse 1.4s infinite; box-shadow: 0 0 35px rgba(250, 204, 21, 0.9); }
             
             @keyframes pulse {
                 0% { transform: scale(0.95); }
@@ -121,64 +116,80 @@ async def serve_app():
                 100% { transform: scale(0.95); }
             }
             
-            .status { font-size: 14px; font-weight: 600; color: #38bdf8; margin-bottom: 16px; min-height: 20px; }
+            .status { font-size: 14px; font-weight: 600; color: #38bdf8; margin-bottom: 14px; min-height: 20px; }
             
-            .chat-box { background: #0f172a; border-radius: 12px; padding: 14px; min-height: 90px; text-align: left; font-size: 14px; border: 1px solid #334155; margin-bottom: 16px; }
-            .user-msg { color: #94a3b8; margin-bottom: 8px; }
-            .lemon-msg { color: #facc15; font-weight: 500; }
+            .display-box { background: #0f172a; border-radius: 12px; padding: 14px; min-height: 85px; text-align: left; font-size: 14px; border: 1px solid #334155; margin-bottom: 14px; }
+            .user-line { color: #94a3b8; margin-bottom: 6px; }
+            .lemon-line { color: #facc15; font-weight: 500; }
             
-            .input-row { display: flex; gap: 8px; }
-            .input-row input { flex: 1; padding: 12px; border-radius: 10px; border: 1px solid #334155; background: #0f172a; color: white; outline: none; font-size: 14px; }
-            .input-row input:focus { border-color: #facc15; }
-            .input-row button { padding: 0 16px; border: none; border-radius: 10px; background: #facc15; color: #0b1120; font-weight: bold; cursor: pointer; }
-            .input-row button:hover { background: #eab308; }
-            
+            .input-box { display: flex; gap: 8px; }
+            .input-box input { flex: 1; padding: 12px; border-radius: 10px; border: 1px solid #334155; background: #0f172a; color: white; outline: none; font-size: 14px; }
+            .input-box input:focus { border-color: #facc15; }
+            .input-box button { padding: 0 16px; border: none; border-radius: 10px; background: #facc15; color: #0b1120; font-weight: bold; cursor: pointer; }
             .hint { font-size: 11px; color: #64748b; margin-top: 14px; }
         </style>
     </head>
     <body>
         <div class="card">
             <h1>🍋 Lemon AI</h1>
-            <p class="sub">Speak ("Hi Lemon") or Type below</p>
+            <p class="sub">Hands-Free Built-in Voice Assistant</p>
 
-            <div class="orb-wrapper" id="orbWrapper">
-                <div class="orb" onclick="toggleVoice()">🎙️</div>
+            <div class="orb-box" id="orbBox">
+                <div class="orb" onclick="toggleMic()">🎙️</div>
             </div>
 
-            <div class="status" id="statusText">Tap mic icon once to activate speech</div>
+            <div class="status" id="statusText">Tap mic once to enable voice</div>
 
-            <div class="chat-box">
-                <div class="user-msg" id="userMsg">Say "Hi Lemon" or type a command...</div>
-                <div class="lemon-msg" id="lemonMsg"></div>
+            <div class="display-box">
+                <div class="user-line" id="userMsg">Say "Hi Lemon" or type below...</div>
+                <div class="lemon-line" id="lemonMsg"></div>
             </div>
 
-            <div class="input-row">
-                <input type="text" id="textInput" placeholder="Type here..." onkeydown="onEnter(event)" />
-                <button onclick="handleSendText()">Send</button>
+            <div class="input-box">
+                <input type="text" id="textInput" placeholder="Type query and press Enter..." onkeydown="handleKey(event)" />
+                <button onclick="submitText()">Send</button>
             </div>
 
             <div class="hint">Tap 🎙️ once. Then simply say: <i>"Hi Lemon, what is the time?"</i></div>
         </div>
 
-        <audio id="player" autoplay></audio>
-
         <script>
             let recognition = null;
             let active = false;
-            let isSpeakingResponse = false;
+            let speaking = false;
 
             const statusText = document.getElementById("statusText");
             const userMsg = document.getElementById("userMsg");
             const lemonMsg = document.getElementById("lemonMsg");
-            const orbWrapper = document.getElementById("orbWrapper");
-            const player = document.getElementById("player");
+            const orbBox = document.getElementById("orbBox");
             const textInput = document.getElementById("textInput");
 
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
+            function speakOut(text, callback) {
+                if (!window.speechSynthesis) {
+                    if (callback) callback();
+                    return;
+                }
+                window.speechSynthesis.cancel();
+                const utter = new SpeechSynthesisUtterance(text);
+                utter.rate = 1.0;
+                utter.pitch = 1.0;
+                utter.onend = () => {
+                    speaking = false;
+                    if (callback) callback();
+                };
+                utter.onerror = () => {
+                    speaking = false;
+                    if (callback) callback();
+                };
+                speaking = true;
+                window.speechSynthesis.speak(utter);
+            }
+
             function setupSpeech() {
                 if (!SpeechRecognition) {
-                    statusText.innerText = "Speech API not available on this browser. Use typing.";
+                    statusText.innerText = "Speech Recognition not supported on this browser";
                     return null;
                 }
                 const rec = new SpeechRecognition();
@@ -187,89 +198,82 @@ async def serve_app():
                 rec.lang = 'en-US';
 
                 rec.onresult = async function(event) {
-                    if (isSpeakingResponse) return;
+                    if (speaking) return;
 
-                    const text = event.results[event.results.length - 1][0].transcript.trim();
-                    userMsg.innerText = `You: "${text}"`;
+                    const spoken = event.results[event.results.length - 1][0].transcript.trim();
+                    userMsg.innerText = `You: "${spoken}"`;
 
-                    const lower = text.toLowerCase();
-                    if (lower.includes("lemon") || lower.includes("hi lemon") || lower.includes("hey lemon")) {
+                    const low = spoken.toLowerCase();
+                    // Catch flexible triggers so accent never fails
+                    if (low.includes("lemon") || low.includes("level") || low.includes("hi") || low.includes("hey")) {
                         statusText.innerText = "⚡ Thinking...";
-                        await sendQuery(text);
+                        await sendCommand(spoken);
                     }
                 };
 
-                rec.onerror = function(e) {
-                    console.log("Rec error:", e.error);
+                rec.onerror = function(err) {
+                    console.log("Rec Error:", err);
                 };
 
                 rec.onend = function() {
-                    if (active && !isSpeakingResponse) {
-                        try { rec.start(); } catch(err) {}
+                    if (active && !speaking) {
+                        try { rec.start(); } catch(e) {}
                     }
                 };
                 return rec;
             }
 
-            function toggleVoice() {
+            function toggleMic() {
                 if (!recognition) recognition = setupSpeech();
                 if (!recognition) return;
 
                 if (!active) {
                     active = true;
                     try { recognition.start(); } catch(e) {}
-                    orbWrapper.classList.add("listening");
+                    orbBox.classList.add("listening");
                     statusText.innerText = "🟢 Listening for 'Hi Lemon'...";
-                    player.play().catch(() => {});
+                    speakOut("Lemon is ready.", () => {});
                 } else {
                     active = false;
                     try { recognition.stop(); } catch(e) {}
-                    orbWrapper.classList.remove("listening");
-                    statusText.innerText = "Mic paused. Tap to resume.";
+                    orbBox.classList.remove("listening");
+                    statusText.innerText = "Mic stopped. Tap to resume.";
                 }
             }
 
-            async function sendQuery(queryStr) {
+            async function sendCommand(query) {
                 try {
                     const res = await fetch("/ask", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ query: queryStr })
+                        body: JSON.stringify({ query: query })
                     });
                     const data = await res.json();
                     lemonMsg.innerText = `Lemon: ${data.reply}`;
 
-                    if (data.audio_base64) {
-                        isSpeakingResponse = true;
-                        player.src = data.audio_base64;
-                        player.onended = () => {
-                            isSpeakingResponse = false;
-                            if (active) {
-                                statusText.innerText = "🟢 Listening for 'Hi Lemon'...";
-                                try { recognition.start(); } catch(e) {}
-                            }
-                        };
-                        await player.play().catch(() => { isSpeakingResponse = false; });
-                    } else {
-                        statusText.innerText = active ? "🟢 Listening for 'Hi Lemon'..." : "Ready";
-                    }
-                } catch(err) {
-                    statusText.innerText = "Error contacting Lemon server.";
-                    isSpeakingResponse = false;
+                    speakOut(data.reply, () => {
+                        if (active) {
+                            statusText.innerText = "🟢 Listening for 'Hi Lemon'...";
+                            try { recognition.start(); } catch(e) {}
+                        }
+                    });
+                } catch(e) {
+                    lemonMsg.innerText = "Lemon: Could not connect to server.";
+                    statusText.innerText = active ? "🟢 Listening for 'Hi Lemon'..." : "Ready";
                 }
             }
 
-            function handleSendText() {
+            function submitText() {
                 const val = textInput.value.trim();
                 if (!val) return;
-                userMsg.innerText = `You: "${val}"`;
+                userMsg.innerText = `You typed: "${val}"`;
                 textInput.value = "";
                 statusText.innerText = "⚡ Thinking...";
-                sendQuery(val);
+                sendCommand(val);
             }
 
-            function onEnter(e) {
-                if (e.key === "Enter") handleSendText();
+            function handleKey(e) {
+                if (e.key === "Enter") submitText();
             }
         </script>
     </body>
