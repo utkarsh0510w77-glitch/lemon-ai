@@ -1,18 +1,16 @@
 import base64
 import datetime
 import os
-import urllib.parse
-from fastapi import FastAPI
+from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from groq import Groq
 from gtts import gTTS
-from pydantic import BaseModel
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
-app = FastAPI(title="Lemon AI Assistant")
+app = FastAPI(title="Lemon AI In-App")
 
 app.add_middleware(
     CORSMiddleware,
@@ -23,57 +21,49 @@ app.add_middleware(
 )
 
 
-class QueryPayload(BaseModel):
-  query: str
+def process_query_text(query: str) -> str:
+  if not query:
+    return "I am listening. How can I help you?"
 
-
-def clean_query(text: str) -> str:
-  # Filter common misheard wake-words like 'high level', 'hi lemon', 'lemon'
-  t = text.lower().strip()
+  clean = query.lower().strip()
   for w in [
       "hi lemon",
       "hey lemon",
-      "hello lemon",
       "lemon",
+      "hello lemon",
       "high level",
       "hi level",
   ]:
-    if t.startswith(w):
-      t = t[len(w) :].strip()
-  return t
+    if clean.startswith(w):
+      clean = clean[len(w) :].strip()
 
-
-def process_query_text(query: str) -> str:
-  clean = clean_query(query)
   if not clean:
-    return "Yes! I am Lemon. How can I help you?"
+    return "Yes! I am Lemon. Tell me what you need."
 
-  # 1. Time query
   if "time" in clean:
-    now = datetime.datetime.now()
-    return f"The current time is {now.strftime('%I:%M %p')}."
+    return (
+        f"The current time is {datetime.datetime.now().strftime('%I:%M %p')}."
+    )
 
-  # 2. YouTube play query
   if clean.startswith("play "):
     song = clean[5:].strip()
     return f"Playing {song} on YouTube."
 
-  # 3. Groq LLM with safety fallback
   if client:
-    for model_name in ["llama-3.1-8b-instant", "llama3-8b-8192"]:
+    for model in ["llama-3.1-8b-instant", "llama3-8b-8192"]:
       try:
         res = client.chat.completions.create(
             messages=[
                 {
                     "role": "system",
                     "content": (
-                        "You are Lemon, a witty and quick voice assistant."
-                        " Answer in 1 short spoken sentence."
+                        "You are Lemon, a friendly mobile app voice assistant."
+                        " Keep responses strictly in 1 to 2 spoken sentences."
                     ),
                 },
                 {"role": "user", "content": clean},
             ],
-            model=model_name,
+            model=model,
             max_tokens=60,
             temperature=0.7,
         )
@@ -81,13 +71,58 @@ def process_query_text(query: str) -> str:
       except Exception:
         continue
 
-  return f"I heard: {clean}."
+  return f"I heard: {clean}"
 
 
-@app.post("/ask")
-async def ask_lemon(payload: QueryPayload):
-  reply_text = process_query_text(payload.query)
-  return JSONResponse({"reply": reply_text})
+@app.post("/voice-process")
+async def voice_process(file: UploadFile = File(...)):
+  temp_audio = "app_input.wav"
+  with open(temp_audio, "wb") as f:
+    f.write(await file.read())
+
+  user_text = ""
+  if client:
+    try:
+      with open(temp_audio, "rb") as f:
+        transcription = client.audio.transcriptions.create(
+            model="whisper-large-v3", file=f, response_format="text"
+        )
+        user_text = str(transcription).strip()
+    except Exception as e:
+      print("STT Error:", e)
+
+  reply_text = process_query_text(user_text)
+
+  # Audio response
+  reply_audio = "app_reply.mp3"
+  tts = gTTS(text=reply_text, lang="en", slow=False)
+  tts.save(reply_audio)
+
+  with open(reply_audio, "rb") as f:
+    audio_b64 = base64.b64encode(f.read()).decode("utf-8")
+
+  return JSONResponse({
+      "user_text": user_text,
+      "reply_text": reply_text,
+      "audio_base64": f"data:audio/mp3;base64,{audio_b64}",
+  })
+
+
+@app.post("/text-process")
+async def text_process(text: str = Form(...)):
+  reply_text = process_query_text(text)
+  reply_audio = "app_reply.mp3"
+  tts = gTTS(text=reply_text, lang="en", slow=False)
+  tts.save(reply_audio)
+
+  with open(reply_audio, "rb") as f:
+    audio_b64 = base64.b64encode(f.read()).decode("utf-8")
+
+  return JSONResponse({
+      "user_text": text,
+      "reply_text": reply_text,
+      "audio_base64": f"data:audio/mp3;base64,{audio_b64}",
+  })
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -97,183 +132,149 @@ async def serve_app():
     <html lang="en">
     <head>
         <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>🍋 Lemon Voice AI</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <title>Lemon AI</title>
         <style>
             * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-            body { background: #0b1120; color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; text-align: center; padding: 16px; }
-            .card { max-width: 450px; width: 100%; background: #1e293b; border-radius: 20px; padding: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid #334155; }
-            h1 { font-size: 26px; color: #facc15; margin-bottom: 6px; }
-            p.sub { font-size: 13px; color: #94a3b8; margin-bottom: 20px; }
-            
-            .orb-box { width: 100px; height: 100px; margin: 0 auto 16px; display: flex; align-items: center; justify-content: center; }
-            .orb { width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg, #facc15, #f59e0b); display: flex; align-items: center; justify-content: center; font-size: 34px; cursor: pointer; transition: transform 0.2s; box-shadow: 0 0 20px rgba(250, 204, 21, 0.4); }
-            .listening .orb { animation: pulse 1.4s infinite; box-shadow: 0 0 35px rgba(250, 204, 21, 0.9); }
-            
+            body { background: #0f172a; color: white; display: flex; flex-direction: column; height: 100vh; justify-content: space-between; padding: 20px; text-align: center; }
+            .header h1 { font-size: 26px; color: #facc15; margin-top: 10px; }
+            .header p { font-size: 13px; color: #94a3b8; }
+
+            .orb-container { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; }
+            .orb { width: 110px; height: 110px; border-radius: 50%; background: linear-gradient(135deg, #facc15, #f59e0b); display: flex; align-items: center; justify-content: center; font-size: 46px; cursor: pointer; box-shadow: 0 0 25px rgba(250, 204, 21, 0.4); transition: transform 0.2s; -webkit-tap-highlight-color: transparent; }
+            .orb:active { transform: scale(0.92); }
+            .recording { animation: pulse 1.2s infinite; box-shadow: 0 0 45px rgba(250, 204, 21, 0.9); }
+
             @keyframes pulse {
                 0% { transform: scale(0.95); }
-                50% { transform: scale(1.08); }
+                50% { transform: scale(1.1); }
                 100% { transform: scale(0.95); }
             }
-            
-            .status { font-size: 14px; font-weight: 600; color: #38bdf8; margin-bottom: 14px; min-height: 20px; }
-            
-            .display-box { background: #0f172a; border-radius: 12px; padding: 14px; min-height: 85px; text-align: left; font-size: 14px; border: 1px solid #334155; margin-bottom: 14px; }
-            .user-line { color: #94a3b8; margin-bottom: 6px; }
-            .lemon-line { color: #facc15; font-weight: 500; }
-            
-            .input-box { display: flex; gap: 8px; }
-            .input-box input { flex: 1; padding: 12px; border-radius: 10px; border: 1px solid #334155; background: #0f172a; color: white; outline: none; font-size: 14px; }
-            .input-box input:focus { border-color: #facc15; }
-            .input-box button { padding: 0 16px; border: none; border-radius: 10px; background: #facc15; color: #0b1120; font-weight: bold; cursor: pointer; }
-            .hint { font-size: 11px; color: #64748b; margin-top: 14px; }
+
+            .status-text { font-size: 15px; font-weight: 600; color: #38bdf8; margin-top: 20px; }
+
+            .dialog-box { background: #1e293b; border-radius: 16px; padding: 16px; min-height: 90px; text-align: left; font-size: 14px; border: 1px solid #334155; margin-bottom: 16px; }
+            .user-msg { color: #94a3b8; margin-bottom: 6px; }
+            .lemon-msg { color: #facc15; font-weight: 500; font-size: 15px; }
+
+            .input-bar { display: flex; gap: 8px; margin-bottom: 10px; }
+            .input-bar input { flex: 1; padding: 14px; border-radius: 12px; border: 1px solid #334155; background: #1e293b; color: white; outline: none; font-size: 15px; }
+            .input-bar button { padding: 0 20px; border-radius: 12px; border: none; background: #facc15; color: #0f172a; font-weight: bold; font-size: 15px; cursor: pointer; }
         </style>
     </head>
     <body>
-        <div class="card">
+        <div class="header">
             <h1>🍋 Lemon AI</h1>
-            <p class="sub">Hands-Free Built-in Voice Assistant</p>
-
-            <div class="orb-box" id="orbBox">
-                <div class="orb" onclick="toggleMic()">🎙️</div>
-            </div>
-
-            <div class="status" id="statusText">Tap mic once to enable voice</div>
-
-            <div class="display-box">
-                <div class="user-line" id="userMsg">Say "Hi Lemon" or type below...</div>
-                <div class="lemon-line" id="lemonMsg"></div>
-            </div>
-
-            <div class="input-box">
-                <input type="text" id="textInput" placeholder="Type query and press Enter..." onkeydown="handleKey(event)" />
-                <button onclick="submitText()">Send</button>
-            </div>
-
-            <div class="hint">Tap 🎙️ once. Then simply say: <i>"Hi Lemon, what is the time?"</i></div>
+            <p>Your Voice & Text Companion</p>
         </div>
 
+        <div class="orb-container">
+            <div class="orb" id="micBtn" onclick="toggleRecord()">🎙️</div>
+            <div class="status-text" id="status">Tap 🎙️ to Speak</div>
+        </div>
+
+        <div>
+            <div class="dialog-box">
+                <div class="user-msg" id="userDisplay">Tap mic or type a message...</div>
+                <div class="lemon-msg" id="lemonDisplay"></div>
+            </div>
+
+            <div class="input-bar">
+                <input type="text" id="typeInput" placeholder="Type here..." onkeydown="if(event.key==='Enter') sendText()" />
+                <button onclick="sendText()">Send</button>
+            </div>
+        </div>
+
+        <audio id="audioOut" autoplay></audio>
+
         <script>
-            let recognition = null;
-            let active = false;
-            let speaking = false;
+            let mediaRecorder = null;
+            let audioChunks = [];
+            let isRecording = false;
 
-            const statusText = document.getElementById("statusText");
-            const userMsg = document.getElementById("userMsg");
-            const lemonMsg = document.getElementById("lemonMsg");
-            const orbBox = document.getElementById("orbBox");
-            const textInput = document.getElementById("textInput");
+            const micBtn = document.getElementById("micBtn");
+            const statusLabel = document.getElementById("status");
+            const userDisplay = document.getElementById("userDisplay");
+            const lemonDisplay = document.getElementById("lemonDisplay");
+            const audioOut = document.getElementById("audioOut");
+            const typeInput = document.getElementById("typeInput");
 
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            async function toggleRecord() {
+                if (!isRecording) {
+                    try {
+                        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                        mediaRecorder = new MediaRecorder(stream);
+                        audioChunks = [];
 
-            function speakOut(text, callback) {
-                if (!window.speechSynthesis) {
-                    if (callback) callback();
-                    return;
-                }
-                window.speechSynthesis.cancel();
-                const utter = new SpeechSynthesisUtterance(text);
-                utter.rate = 1.0;
-                utter.pitch = 1.0;
-                utter.onend = () => {
-                    speaking = false;
-                    if (callback) callback();
-                };
-                utter.onerror = () => {
-                    speaking = false;
-                    if (callback) callback();
-                };
-                speaking = true;
-                window.speechSynthesis.speak(utter);
-            }
+                        mediaRecorder.ondataavailable = (e) => {
+                            if (e.data.size > 0) audioChunks.push(e.data);
+                        };
 
-            function setupSpeech() {
-                if (!SpeechRecognition) {
-                    statusText.innerText = "Speech Recognition not supported on this browser";
-                    return null;
-                }
-                const rec = new SpeechRecognition();
-                rec.continuous = true;
-                rec.interimResults = false;
-                rec.lang = 'en-US';
+                        mediaRecorder.onstop = async () => {
+                            const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                            statusLabel.innerText = "⚡ Lemon is thinking...";
+                            uploadAudio(audioBlob);
+                            stream.getTracks().forEach(t => t.stop());
+                        };
 
-                rec.onresult = async function(event) {
-                    if (speaking) return;
-
-                    const spoken = event.results[event.results.length - 1][0].transcript.trim();
-                    userMsg.innerText = `You: "${spoken}"`;
-
-                    const low = spoken.toLowerCase();
-                    // Catch flexible triggers so accent never fails
-                    if (low.includes("lemon") || low.includes("level") || low.includes("hi") || low.includes("hey")) {
-                        statusText.innerText = "⚡ Thinking...";
-                        await sendCommand(spoken);
+                        mediaRecorder.start();
+                        isRecording = true;
+                        micBtn.classList.add("recording");
+                        statusLabel.innerText = "🔴 Listening... Tap again to send";
+                    } catch(err) {
+                        alert("Microphone permission required! Please enable microphone in your app permissions.");
+                        statusLabel.innerText = "Mic access blocked";
                     }
-                };
-
-                rec.onerror = function(err) {
-                    console.log("Rec Error:", err);
-                };
-
-                rec.onend = function() {
-                    if (active && !speaking) {
-                        try { rec.start(); } catch(e) {}
-                    }
-                };
-                return rec;
-            }
-
-            function toggleMic() {
-                if (!recognition) recognition = setupSpeech();
-                if (!recognition) return;
-
-                if (!active) {
-                    active = true;
-                    try { recognition.start(); } catch(e) {}
-                    orbBox.classList.add("listening");
-                    statusText.innerText = "🟢 Listening for 'Hi Lemon'...";
-                    speakOut("Lemon is ready.", () => {});
                 } else {
-                    active = false;
-                    try { recognition.stop(); } catch(e) {}
-                    orbBox.classList.remove("listening");
-                    statusText.innerText = "Mic stopped. Tap to resume.";
+                    isRecording = false;
+                    micBtn.classList.remove("recording");
+                    if (mediaRecorder) mediaRecorder.stop();
                 }
             }
 
-            async function sendCommand(query) {
+            async function uploadAudio(blob) {
+                const fd = new FormData();
+                fd.append("file", blob, "voice.wav");
+
                 try {
-                    const res = await fetch("/ask", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ query: query })
-                    });
+                    const res = await fetch("/voice-process", { method: "POST", body: fd });
                     const data = await res.json();
-                    lemonMsg.innerText = `Lemon: ${data.reply}`;
+                    userDisplay.innerText = `You: "${data.user_text || 'Voice command'}"`;
+                    lemonDisplay.innerText = `Lemon: ${data.reply_text}`;
+                    statusLabel.innerText = "Tap 🎙️ to Speak";
 
-                    speakOut(data.reply, () => {
-                        if (active) {
-                            statusText.innerText = "🟢 Listening for 'Hi Lemon'...";
-                            try { recognition.start(); } catch(e) {}
-                        }
-                    });
+                    if (data.audio_base64) {
+                        audioOut.src = data.audio_base64;
+                        audioOut.play();
+                    }
                 } catch(e) {
-                    lemonMsg.innerText = "Lemon: Could not connect to server.";
-                    statusText.innerText = active ? "🟢 Listening for 'Hi Lemon'..." : "Ready";
+                    statusLabel.innerText = "Server error. Try again.";
                 }
             }
 
-            function submitText() {
-                const val = textInput.value.trim();
+            async function sendText() {
+                const val = typeInput.value.trim();
                 if (!val) return;
-                userMsg.innerText = `You typed: "${val}"`;
-                textInput.value = "";
-                statusText.innerText = "⚡ Thinking...";
-                sendCommand(val);
-            }
+                typeInput.value = "";
+                userDisplay.innerText = `You: "${val}"`;
+                statusLabel.innerText = "⚡ Lemon is thinking...";
 
-            function handleKey(e) {
-                if (e.key === "Enter") submitText();
+                const fd = new FormData();
+                fd.append("text", val);
+
+                try {
+                    const res = await fetch("/text-process", { method: "POST", body: fd });
+                    const data = await res.json();
+                    lemonDisplay.innerText = `Lemon: ${data.reply_text}`;
+                    statusLabel.innerText = "Tap 🎙️ to Speak";
+
+                    if (data.audio_base64) {
+                        audioOut.src = data.audio_base64;
+                        audioOut.play();
+                    }
+                } catch(e) {
+                    statusLabel.innerText = "Server error. Try again.";
+                }
             }
         </script>
     </body>
