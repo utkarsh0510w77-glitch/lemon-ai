@@ -122,15 +122,99 @@ def process_query_text(query: str) -> str:
               ],
               model=alt_model,
               max_tokens=90,
-          )
-          return alt_res.choices[0].message.content.strip()
-        except Exception:
-          continue
-      return f"Groq Error: {str(e)}"
+      import base64
+import datetime
+import os
+import urllib.parse
+from fastapi import FastAPI, File, Form, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, JSONResponse
+from groq import Groq
+from gtts import gTTS
 
-  return (
-      "GROQ_API_KEY environment variable is not configured in Render settings."
-  )
+# Aapki API Key directly integrate kar di gayi hai
+GROQ_API_KEY = (
+    os.getenv("GROQ_API_KEY")
+    or "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"
+)
+client = Groq(api_key=GROQ_API_KEY)
+
+app = FastAPI(title="Lemon AI Assistant")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+def ask_groq_llm(user_prompt: str) -> str:
+  # Models list with instant fallback
+  models_to_try = [
+      "openai/gpt-oss-20b",
+      "llama-3.1-8b-instant",
+      "openai/gpt-oss-120b",
+  ]
+  for m in models_to_try:
+    try:
+      chat = client.chat.completions.create(
+          messages=[
+              {
+                  "role": "system",
+                  "content": (
+                      "You are Lemon, a witty and smart AI voice assistant."
+                      " Give a direct, accurate answer in 1 or 2 concise"
+                      " spoken sentences."
+                  ),
+              },
+              {"role": "user", "content": user_prompt},
+          ],
+          model=m,
+          max_tokens=90,
+          temperature=0.6,
+      )
+      if chat.choices and chat.choices[0].message.content:
+        return chat.choices[0].message.content.strip()
+    except Exception as e:
+      print(f"Model {m} failed: {e}")
+      continue
+
+  return "I'm having trouble processing that right now. Please try again."
+
+
+def process_query_text(query: str) -> str:
+  if not query:
+    return "I am listening. How can I help you today?"
+
+  clean = query.lower().strip()
+  for w in [
+      "hi lemon",
+      "hey lemon",
+      "hello lemon",
+      "lemon",
+      "high level",
+      "hi level",
+  ]:
+    if clean.startswith(w):
+      clean = clean[len(w) :].strip()
+
+  if not clean or clean in ["hi", "hello", "hey"]:
+    return "Hello! I am Lemon. What can I do for you?"
+
+  # 1. Quick commands
+  if "time" in clean:
+    return (
+        f"The current time is {datetime.datetime.now().strftime('%I:%M %p')}."
+    )
+
+  if clean.startswith("play "):
+    song = clean[5:].strip()
+    return f"Playing {song} on YouTube."
+
+  # 2. AI Question Answering via Groq
+  return ask_groq_llm(clean)
 
 
 @app.post("/voice-process")
@@ -140,19 +224,18 @@ async def voice_process(file: UploadFile = File(...)):
     f.write(await file.read())
 
   user_text = ""
-  if client:
-    try:
-      with open(temp_audio, "rb") as f:
-        transcription = client.audio.transcriptions.create(
-            model="whisper-large-v3", file=f, response_format="text"
-        )
-        user_text = str(transcription).strip()
-    except Exception as e:
-      print("Whisper STT Error:", e)
+  try:
+    with open(temp_audio, "rb") as f:
+      transcription = client.audio.transcriptions.create(
+          model="whisper-large-v3", file=f, response_format="text"
+      )
+      user_text = str(transcription).strip()
+  except Exception as e:
+    print("Whisper STT Error:", e)
 
   reply_text = process_query_text(user_text)
 
-  # Audio response
+  # Audio synthesis
   reply_audio = "app_reply.mp3"
   tts = gTTS(text=reply_text, lang="en", slow=False)
   tts.save(reply_audio)
