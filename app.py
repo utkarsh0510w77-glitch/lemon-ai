@@ -18,7 +18,7 @@ PART2 = "b3FYnQHV93Lkgjmz4CtDJ1IpMfy4"
 GROQ_API_KEY = os.getenv("GROQ_API_KEY") or (PART1 + PART2)
 client = Groq(api_key=GROQ_API_KEY)
 
-app = FastAPI(title="Lemon AI - Vision Fixed & Rage Mode Edition")
+app = FastAPI(title="Lemon AI - High-Precision Vision & Rage Core Edition")
 
 app.add_middleware(
     CORSMiddleware,
@@ -174,7 +174,7 @@ def generate_ai_title(prompt: str) -> str:
 def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_base64: str = None) -> tuple[str, str]:
     instruction = PROMPT_MODES.get(mode, PROMPT_MODES["rage"]) + (
         "\nOUTPUT FORMAT: Line 1 MUST strictly be [EMOTION: <SingleWord>]. "
-        "Eligible: Fierce, Analytical, Insightful, Brilliant, Tender, Serene, Strategic. "
+        "Eligible tags: Fierce, Analytical, Insightful, Brilliant, Tender, Serene, Strategic. "
         "Followed directly by your comprehensive response."
     )
 
@@ -185,16 +185,15 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
         else:
             clean_image = f"data:image/jpeg;base64,{image_base64}"
 
-    # Handle vision inputs
+    # Multimodal Vision Pipeline
     if clean_image:
         vision_models = [
-            "llama-3.2-11b-vision-preview",
-            "llama-3.2-90b-vision-preview",
-            "qwen/qwen3.6-27b"
+            "qwen/qwen3.8-27b",
+            "meta-llama/llama-4-scout-17b-16e-instruct"
         ]
 
         prompt_text = user_prompt if (user_prompt and len(user_prompt.strip()) > 0) else (
-            "Scan this image line-by-line. Identify any mistakes, incorrect steps, syntax errors, or logic flaws. "
+            "Scan this image line-by-line. Identify any mistakes, incorrect calculations, syntax errors, or logic flaws. "
             "Explain why they are wrong, and provide the exact correct step-by-step solution."
         )
 
@@ -225,7 +224,7 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
                 print(f"Vision model {vm} attempt failed: {e}")
                 continue
 
-        return "Image analysis could not be completed with the current vision models. Please try re-uploading the image in JPG/PNG format.", "Fierce"
+        return "Image scan error. Please re-take or re-upload the photo cleanly so the vision engine can inspect it.", "Fierce"
 
     # Text Reasoning Pipeline
     text_models = ["llama-3.1-8b-instant", "openai/gpt-oss-20b", "openai/gpt-oss-120b"]
@@ -397,7 +396,7 @@ def handle_conversation(user_id: int, session_id: int, query: str, mode: str, im
     conn.commit()
     conn.close()
 
-    # Audio synthesis
+    # Spoken Audio Note Synthesis
     audio_base64 = None
     try:
         speech_clean = re.sub(r'[*#|_>`]', '', reply)
@@ -1390,7 +1389,7 @@ async def serve_app():
 
                 textInput.value = "";
                 appendMessage("user", text ? text : "Scan this photo and pinpoint every error with the exact fix.", null, imageToSend);
-                setThinking(true, imageToSend ? "Vision Engine: Detecting mistakes..." : "Engaging " + activeCore.toUpperCase() + " focus...");
+                setThinking(true, imageToSend ? "Vision Engine: Inspecting errors..." : "Engaging " + activeCore.toUpperCase() + " focus...");
 
                 const fd = new FormData();
                 fd.append("text", text ? text : "Examine this image line-by-line. Spot all errors, calculations, or logic flaws, explain why, and write out the exact fix.");
