@@ -17,7 +17,7 @@ PART2 = "b3FYnQHV93Lkgjmz4CtDJ1IpMfy4"
 GROQ_API_KEY = os.getenv("GROQ_API_KEY") or (PART1 + PART2)
 client = Groq(api_key=GROQ_API_KEY)
 
-app = FastAPI(title="Lemon AI - Extended Cognitive Cores Edition")
+app = FastAPI(title="Lemon AI - Persistent History Engine")
 
 app.add_middleware(
     CORSMiddleware,
@@ -75,7 +75,6 @@ def hash_password(password: str) -> str:
     salt = "lemon_permanent_salt_2026"
     return hashlib.sha256((password + salt).encode('utf-8')).hexdigest()
 
-# ----------------- EXPANDED COGNITIVE CORE PROMPTS -----------------
 PROMPT_MODES = {
     "philosophy": (
         "You are Lemon, functioning strictly in your DEEP PHILOSOPHY & EXISTENTIAL CORE. "
@@ -251,6 +250,27 @@ def get_session_messages(session_id: int):
     messages = [{"role": r[0], "content": r[1], "mode": r[2], "emotion": r[3], "timestamp": r[4]} for r in rows]
     return JSONResponse({"messages": messages})
 
+@app.post("/api/restore-backup")
+def restore_backup(user_id: int = Form(...), sessions_json: str = Form(...)):
+    """Restores local client backup back into the SQLite DB if the container was wiped."""
+    try:
+        data = json.loads(sessions_json)
+        conn = get_db()
+        cur = conn.cursor()
+        for sess in data:
+            cur.execute("INSERT INTO sessions (user_id, title) VALUES (?, ?)", (user_id, sess.get("title", "Conversation")))
+            s_id = cur.lastrowid
+            for msg in sess.get("messages", []):
+                cur.execute(
+                    "INSERT INTO messages (session_id, role, content, mode, emotion) VALUES (?, ?, ?, ?, ?)",
+                    (s_id, msg.get("role", "user"), msg.get("content", ""), msg.get("mode", "hybrid"), msg.get("emotion"))
+                )
+        conn.commit()
+        conn.close()
+        return JSONResponse({"status": "ok"})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=400)
+
 @app.post("/api/delete-session")
 def delete_session(session_id: int = Form(...)):
     conn = get_db()
@@ -373,7 +393,7 @@ async def serve_app():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-        <title>Lemon AI | Extended Cognitive Cores</title>
+        <title>Lemon AI | Persistent Chat & Memory</title>
         <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
         <style>
             :root {
@@ -477,7 +497,6 @@ async def serve_app():
             .session-delete { color: #f87171; font-size: 12px; opacity: 0.6; padding: 2px 4px; }
             .session-delete:hover { opacity: 1; }
 
-            /* 8 Cognitive Cores Grid */
             .core-btn-grid {
                 display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px;
             }
@@ -679,7 +698,7 @@ async def serve_app():
         <script>
             let currentUserId = localStorage.getItem("lemon_user_id");
             let currentUsername = localStorage.getItem("lemon_username");
-            let currentSessionId = 0;
+            let currentSessionId = parseInt(localStorage.getItem("lemon_current_session_id") || "0");
             let activeCore = localStorage.getItem("lemon_active_core") || "hybrid";
             let isVoiceEnabled = localStorage.getItem("lemon_voice_enabled") === "true";
             let isAuthRegister = false;
@@ -701,6 +720,33 @@ async def serve_app():
             const sessionsList = document.getElementById("sessionsList");
             const heroGreeting = document.getElementById("heroGreeting");
             const heroGreetingName = document.getElementById("heroGreetingName");
+
+            // Client-side persistent backup per user
+            function getClientBackupKey() {
+                return `lemon_backup_${currentUserId}`;
+            }
+
+            function getClientBackup() {
+                try {
+                    return JSON.parse(localStorage.getItem(getClientBackupKey()) || "[]");
+                } catch(e) {
+                    return [];
+                }
+            }
+
+            function saveMessageToClientBackup(sessionId, title, messageObj) {
+                if (!currentUserId) return;
+                let backup = getClientBackup();
+                let session = backup.find(s => s.id === sessionId);
+                if (!session) {
+                    session = { id: sessionId, title: title, messages: [] };
+                    backup.unshift(session);
+                } else if (title && session.title !== title) {
+                    session.title = title;
+                }
+                session.messages.push(messageObj);
+                localStorage.setItem(getClientBackupKey(), JSON.stringify(backup));
+            }
 
             function openSidebar() {
                 loadSessionsList();
@@ -740,7 +786,7 @@ async def serve_app():
                     sidebarUsername.innerText = currentUsername;
                     const formattedName = currentUsername.charAt(0).toUpperCase() + currentUsername.slice(1);
                     heroGreetingName.innerText = `Hello, ${formattedName}`;
-                    loadSessionsList();
+                    initHistory();
                 } else {
                     authModal.style.display = "flex";
                 }
@@ -785,12 +831,51 @@ async def serve_app():
             function logout() {
                 localStorage.removeItem("lemon_user_id");
                 localStorage.removeItem("lemon_username");
+                localStorage.removeItem("lemon_current_session_id");
                 currentUserId = null;
                 currentUsername = null;
                 currentSessionId = 0;
                 chatStream.innerHTML = "";
                 closeSidebar();
                 checkAuth();
+            }
+
+            // Initializes history & restores if Render server wiped the database
+            async function initHistory() {
+                try {
+                    const res = await fetch(`/api/sessions/${currentUserId}`);
+                    const data = await res.json();
+
+                    if (!data.sessions || data.sessions.length === 0) {
+                        const localBackup = getClientBackup();
+                        if (localBackup.length > 0) {
+                            // Server was wiped: Restore client backup to server
+                            const fd = new FormData();
+                            fd.append("user_id", currentUserId);
+                            fd.append("sessions_json", JSON.stringify(localBackup));
+                            await fetch("/api/restore-backup", { method: "POST", body: fd });
+                            return initHistory();
+                        }
+                    }
+
+                    await loadSessionsList();
+
+                    // Auto-open last active session or the latest session
+                    if (currentSessionId && currentSessionId !== 0) {
+                        await openSession(currentSessionId);
+                    } else if (data.sessions && data.sessions.length > 0) {
+                        await openSession(data.sessions[0].id);
+                    } else {
+                        startNewChat();
+                    }
+                } catch(e) {
+                    console.log("Error initializing history:", e);
+                    // Fallback to local backup
+                    const localBackup = getClientBackup();
+                    if (localBackup.length > 0) {
+                        openLocalSession(localBackup[0]);
+                    }
+                }
             }
 
             async function loadSessionsList() {
@@ -819,6 +904,7 @@ async def serve_app():
 
             function startNewChat() {
                 currentSessionId = 0;
+                localStorage.setItem("lemon_current_session_id", "0");
                 chatStream.innerHTML = "";
                 chatStream.appendChild(heroGreeting);
                 heroGreeting.style.display = "flex";
@@ -828,6 +914,7 @@ async def serve_app():
 
             async function openSession(id) {
                 currentSessionId = id;
+                localStorage.setItem("lemon_current_session_id", id.toString());
                 closeSidebar();
                 heroGreeting.style.display = "none";
                 chatStream.innerHTML = "";
@@ -835,12 +922,21 @@ async def serve_app():
                 try {
                     const res = await fetch(`/api/session-messages/${id}`);
                     const data = await res.json();
-                    if (data.messages) {
+                    if (data.messages && data.messages.length > 0) {
                         data.messages.forEach(m => appendMessage(m.role === "assistant" ? "lemon" : "user", m.content, m.emotion));
                     }
                 } catch(e) {
                     console.log("Error loading session:", e);
+                    const backup = getClientBackup().find(s => s.id === id);
+                    if (backup) openLocalSession(backup);
                 }
+            }
+
+            function openLocalSession(session) {
+                currentSessionId = session.id;
+                heroGreeting.style.display = "none";
+                chatStream.innerHTML = "";
+                session.messages.forEach(m => appendMessage(m.role === "assistant" ? "lemon" : "user", m.content, m.emotion));
             }
 
             async function deleteSession(e, id) {
@@ -849,6 +945,11 @@ async def serve_app():
                 const fd = new FormData();
                 fd.append("session_id", id);
                 await fetch("/api/delete-session", { method: "POST", body: fd });
+                
+                // Remove from client backup
+                let backup = getClientBackup().filter(s => s.id !== id);
+                localStorage.setItem(getClientBackupKey(), JSON.stringify(backup));
+
                 if (currentSessionId === id) startNewChat();
                 loadSessionsList();
             }
@@ -942,6 +1043,12 @@ async def serve_app():
                     const res = await fetch("/text-process", { method: "POST", body: fd });
                     const data = await res.json();
                     currentSessionId = data.session_id;
+                    localStorage.setItem("lemon_current_session_id", currentSessionId.toString());
+
+                    // Save to local backup
+                    saveMessageToClientBackup(currentSessionId, data.title, { role: "user", content: text, mode: activeCore });
+                    saveMessageToClientBackup(currentSessionId, data.title, { role: "assistant", content: data.reply_text, mode: activeCore, emotion: data.emotion });
+
                     appendMessage("lemon", data.reply_text, data.emotion);
                     if (isVoiceEnabled && data.audio_base64) {
                         audioElement.src = data.audio_base64;
@@ -995,7 +1102,14 @@ async def serve_app():
                     const res = await fetch("/voice-process", { method: "POST", body: fd });
                     const data = await res.json();
                     currentSessionId = data.session_id;
-                    if (data.user_text) appendMessage("user", data.user_text);
+                    localStorage.setItem("lemon_current_session_id", currentSessionId.toString());
+
+                    if (data.user_text) {
+                        saveMessageToClientBackup(currentSessionId, data.title, { role: "user", content: data.user_text, mode: activeCore });
+                        appendMessage("user", data.user_text);
+                    }
+                    saveMessageToClientBackup(currentSessionId, data.title, { role: "assistant", content: data.reply_text, mode: activeCore, emotion: data.emotion });
+
                     appendMessage("lemon", data.reply_text, data.emotion);
                     if (isVoiceEnabled && data.audio_base64) {
                         audioElement.src = data.audio_base64;
