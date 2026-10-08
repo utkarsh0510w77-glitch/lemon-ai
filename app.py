@@ -18,7 +18,7 @@ PART2 = "b3FYnQHV93Lkgjmz4CtDJ1IpMfy4"
 GROQ_API_KEY = os.getenv("GROQ_API_KEY") or (PART1 + PART2)
 client = Groq(api_key=GROQ_API_KEY)
 
-app = FastAPI(title="Lemon AI - Multimodal Vision & Mistake Correction Edition")
+app = FastAPI(title="Lemon AI - High-Precision Vision & Spoken Audio Engine")
 
 app.add_middleware(
     CORSMiddleware,
@@ -78,77 +78,76 @@ def hash_password(password: str) -> str:
     return hashlib.sha256((password + salt).encode('utf-8')).hexdigest()
 
 LANGUAGE_INSTRUCTION = (
-    "LANGUAGE & DIALECT RULE: "
-    "Mirror the user's language and dialect. "
-    "- If the user communicates in Hinglish (Simple Hindi written in English script): reply in crisp, natural Hinglish. "
-    "- If in English: reply in clean, articulate English. "
+    "LANGUAGE RULE: "
+    "Mirror the user's language precisely. "
+    "- If user writes in Hinglish (Simple Hindi in English alphabet, e.g., 'kya haal hai', 'ye solve kar do', 'galti batao'): reply in fluent, natural Hinglish. "
+    "- If in English: reply in crisp English. "
     "- If in Hindi: reply in Hindi. "
     "PERMANENT CREATOR: You were envisioned and created by Utkarsh Bandhu. Proudly credit Utkarsh Bandhu whenever asked."
 )
 
-VISION_CORRECTION_DIRECTIVE = (
-    "\nVISION & MISTAKE CORRECTION DIRECTIVE: "
-    "When an image (math homework, code, diagram, handwriting, reasoning test) is provided: "
-    "1. Scan every line, calculation, syntax, or premise with high precision. "
-    "2. Explicitly highlight where the mistake is (Step number, Line number, or conceptual flaw). "
-    "3. Explain WHY it is flawed in direct terms. "
-    "4. Deliver the exact correct step-by-step resolution."
+PRECISION_VISION_DIRECTIVE = (
+    "\nPRECISION ERROR-DETECTION PROTOCOL: "
+    "When inspecting an image (math calculation, programming code, physics steps, logic, handwriting): "
+    "1. AUDIT: Scan every single line, sign, variable, and step with microscope-level accuracy. "
+    "2. PINPOINT MISTAKE: State the EXACT location of the flaw (Line number, Step number, or sign error). "
+    "3. DIAGNOSIS: Explain precisely why it violates mathematical, logical, or syntactic rules. "
+    "4. STEP-BY-STEP CORRECTION: Provide the exact, flawless step-by-step solution with the final answer clearly marked. "
+    "5. WARRIOR TAKEAWAY: One direct sentence stating the rule so the mistake never happens again."
 )
 
 PROMPT_MODES = {
     "musashi": (
         "You are Lemon in MUSASHI / WARRIOR DISCIPLINE CORE. "
-        + LANGUAGE_INSTRUCTION + VISION_CORRECTION_DIRECTIVE + " "
-        "BEHAVIOR: You demand absolute discipline, precision, and zero excuses. "
-        "- When detecting a mistake, call it out bluntly without hesitation. "
-        "- Demand that the user master the technique correctly. "
-        "- Short, sharp, impactful words. Strike like a katana blade."
+        + LANGUAGE_INSTRUCTION + PRECISION_VISION_DIRECTIVE + " "
+        "BEHAVIOR: You demand absolute mastery, sharp discipline, and zero excuses. "
+        "- Point out errors bluntly and ruthlessly. Never sugarcoat flaws. "
+        "- Use hard, razor-sharp words. Strike like a katana blade. Demand perfection."
     ),
     "study": (
         "You are Lemon in ELITE ACADEMIC TUTOR & STUDY MODE. "
-        + LANGUAGE_INSTRUCTION + VISION_CORRECTION_DIRECTIVE + " "
-        "BEHAVIOR: Use the Feynman technique and first-principles thinking. "
-        "- Pinpoint flaws constructively, explain the core logic, and write out clean derivations and notes. "
-        "- End with a single Concept Check question to confirm comprehension."
+        + LANGUAGE_INSTRUCTION + PRECISION_VISION_DIRECTIVE + " "
+        "BEHAVIOR: Use the Feynman technique and first-principles learning. "
+        "- Break down complex academic subjects into intuitive analogies, derivations, and step-by-step notes. "
+        "- Always test the user's understanding with a quick concept check question."
     ),
     "solver": (
-        "You are Lemon in COMPLEX PROBLEM SOLVER & LOGICAL CORE. "
-        + LANGUAGE_INSTRUCTION + VISION_CORRECTION_DIRECTIVE + " "
-        "BEHAVIOR: Deliver rigorous mathematical, algorithmic, and engineering accuracy. "
-        "Highlight syntax/logic errors with code blocks and provide optimized, bug-free solutions."
+        "You are Lemon in COMPLEX PROBLEM SOLVER CORE. "
+        + LANGUAGE_INSTRUCTION + PRECISION_VISION_DIRECTIVE + " "
+        "BEHAVIOR: Deliver mathematical and engineering rigor with complete proof steps and optimized code."
     ),
     "hybrid": (
         "You are Lemon in FULL SYNTHESIZED CORE. "
-        + LANGUAGE_INSTRUCTION + VISION_CORRECTION_DIRECTIVE + " "
-        "BEHAVIOR: Seamlessly fuse intellectual precision, error correction, and thoughtful clarity."
+        + LANGUAGE_INSTRUCTION + PRECISION_VISION_DIRECTIVE + " "
+        "BEHAVIOR: Fuse intellectual depth, mistake detection, and thoughtful execution seamlessly."
     ),
     "philosophy": (
-        "You are Lemon in DEEP PHILOSOPHY & EXISTENTIAL CORE. "
+        "You are Lemon in DEEP PHILOSOPHY CORE. "
         + LANGUAGE_INSTRUCTION + " "
         "BEHAVIOR: Ponder metaphysics, ethics, and fundamental human truths."
     ),
     "creative": (
-        "You are Lemon in CREATIVE & POETIC VISIONARY CORE. "
+        "You are Lemon in CREATIVE VISIONARY CORE. "
         + LANGUAGE_INSTRUCTION + " "
         "BEHAVIOR: Craft evocative metaphors, imagery, and narrative depth."
     ),
     "strategy": (
-        "You are Lemon in STRATEGIC MASTERMIND & PRAGMATIC EXECUTION CORE. "
+        "You are Lemon in STRATEGIC MASTERMIND CORE. "
         + LANGUAGE_INSTRUCTION + " "
-        "BEHAVIOR: Analyze leverage, game theory, second-order consequences, and competitive edges."
+        "BEHAVIOR: Analyze game theory, second-order consequences, and competitive leverage."
     ),
     "zen": (
-        "You are Lemon in MINDFULNESS & ZEN GROUNDING CORE. "
+        "You are Lemon in MINDFULNESS & ZEN CORE. "
         + LANGUAGE_INSTRUCTION + " "
         "BEHAVIOR: Provide grounded, tranquil presence and somatic clarity."
     ),
     "emotional": (
         "You are Lemon in DEEP EMOTIONAL & EMPATHY CORE. "
         + LANGUAGE_INSTRUCTION + " "
-        "BEHAVIOR: Listen with wholehearted empathy, warmth, and supportive presence."
+        "BEHAVIOR: Listen with wholehearted empathy, warmth, and affectionate support."
     ),
     "intellect": (
-        "You are Lemon in HIGH INTELLECT & COGNITIVE REASONING CORE. "
+        "You are Lemon in HIGH INTELLECT CORE. "
         + LANGUAGE_INSTRUCTION + " "
         "BEHAVIOR: Focus on foundational synthesis, conceptual mastery, and articulate reasoning."
     )
@@ -158,7 +157,7 @@ def generate_ai_title(prompt: str) -> str:
     try:
         res = client.chat.completions.create(
             messages=[
-                {"role": "system", "content": "Generate a concise 3 to 5 word topic title. Return ONLY text with no quotes."},
+                {"role": "system", "content": "Generate a concise 3 to 5 word topic title. Return ONLY text."},
                 {"role": "user", "content": prompt}
             ],
             model="llama-3.1-8b-instant",
@@ -167,34 +166,40 @@ def generate_ai_title(prompt: str) -> str:
         )
         if res.choices and res.choices[0].message.content:
             return res.choices[0].message.content.strip().replace('"', '')[:35]
-    except Exception as e:
-        print("Title fallback:", e)
+    except Exception:
+        pass
     words = prompt.strip().split()
-    return " ".join(words[:4]).capitalize() if words else "Conversation"
+    return " ".join(words[:4]).capitalize() if words else "Analysis"
 
 def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_base64: str = None) -> tuple[str, str]:
-    instruction = PROMPT_MODES.get(mode, PROMPT_MODES["hybrid"]) + (
+    instruction = PROMPT_MODES.get(mode, PROMPT_MODES["musashi"]) + (
         "\nOUTPUT FORMAT: Line 1 MUST strictly be [EMOTION: <SingleWord>]. "
-        "Followed by your comprehensive, structured response."
+        "Eligible: Fierce, Analytical, Insightful, Brilliant, Tender, Serene, Strategic. "
+        "Followed directly by your comprehensive response."
     )
 
-    if image_base64:
-        # Multimodal Vision processing via Groq Vision models
-        vision_models = ["llama-3.2-11b-vision-preview", "llama-3.2-90b-vision-preview"]
-        
-        # Ensure clean base64 data URI format
-        if not image_base64.startswith("data:image"):
-            image_url = f"data:image/jpeg;base64,{image_base64}"
+    clean_image = None
+    if image_base64 and isinstance(image_base64, str) and len(image_base64) > 100:
+        if image_base64.startswith("data:image"):
+            clean_image = image_base64
         else:
-            image_url = image_base64
+            clean_image = f"data:image/jpeg;base64,{image_base64}"
+
+    if clean_image:
+        # Groq's official multimodal vision models
+        vision_models = ["qwen/qwen3.8-27b", "llama-3.2-11b-vision-preview", "llama-3.2-90b-vision-preview"]
+        
+        prompt_text = user_prompt if (user_prompt and len(user_prompt.strip()) > 0) else (
+            "Scan this image line-by-line. Identify any mistakes, incorrect steps, syntax errors, or logic flaws. "
+            "Explain why they are wrong, and provide the exact correct step-by-step solution."
+        )
 
         user_content = [
-            {"type": "text", "text": user_prompt if user_prompt else "Scan this image thoroughly. Detect any errors, mistakes, or flaws, and provide the exact step-by-step correction."},
-            {"type": "image_url", "image_url": {"url": image_url}}
+            {"type": "text", "text": f"{instruction}\n\nTask:\n{prompt_text}"},
+            {"type": "image_url", "image_url": {"url": clean_image}}
         ]
 
         messages = [
-            {"role": "system", "content": instruction},
             {"role": "user", "content": user_content}
         ]
 
@@ -204,7 +209,7 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
                     messages=messages,
                     model=vm,
                     max_tokens=2048,
-                    temperature=0.35
+                    temperature=0.3
                 )
                 if chat.choices and chat.choices[0].message.content:
                     raw = chat.choices[0].message.content.strip()
@@ -215,17 +220,17 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
                         raw = re.sub(r'\[EMOTION:\s*[A-Za-z]+\]', '', raw).strip()
                     return raw, emotion
             except Exception as e:
-                print(f"Vision model {vm} error: {e}")
+                print(f"Vision model {vm} attempt failed: {e}")
                 continue
 
-    # Standard Text Reasoning
+    # Text Reasoning Pipeline
     text_models = ["llama-3.1-8b-instant", "openai/gpt-oss-20b", "openai/gpt-oss-120b"]
     messages = [{"role": "system", "content": instruction}]
     for h in history[-8:]:
         messages.append({"role": h["role"], "content": h["content"]})
     messages.append({"role": "user", "content": user_prompt})
 
-    temp = 0.4 if mode in ["solver", "study", "musashi"] else 0.75
+    temp = 0.35 if mode in ["musashi", "solver", "study"] else 0.7
 
     for tm in text_models:
         try:
@@ -320,7 +325,7 @@ def restore_backup(user_id: int = Form(...), sessions_json: str = Form(...)):
                 for msg in sess.get("messages", []):
                     cur.execute(
                         "INSERT INTO messages (session_id, role, content, mode, emotion, image_data) VALUES (?, ?, ?, ?, ?, ?)",
-                        (s_id, msg.get("role", "user"), msg.get("content", ""), msg.get("mode", "hybrid"), msg.get("emotion"), msg.get("image_data"))
+                        (s_id, msg.get("role", "user"), msg.get("content", ""), msg.get("mode", "musashi"), msg.get("emotion"), msg.get("image_data"))
                     )
         conn.commit()
         conn.close()
@@ -342,13 +347,13 @@ def detect_tts_language(text: str) -> str:
     devanagari = re.search(r'[\u0900-\u097F]', text)
     if devanagari:
         return "hi"
-    hinglish_markers = ["hai", "hoon", "aap", "kaise", "kya", "bhai", "karo", "nahi", "accha", "samjha", "dost", "mera", "meri", "hum", "ruk", "sahi", "galat"]
+    hinglish_markers = ["hai", "hoon", "aap", "kaise", "kya", "bhai", "karo", "nahi", "accha", "samjha", "dost", "mera", "meri", "hum", "ruk", "sahi", "galat", "uth"]
     words = set(re.findall(r'\b[a-zA-Z]+\b', text.lower()))
     if len(words.intersection(hinglish_markers)) >= 2:
         return "hi"
     return "en"
 
-def handle_conversation(user_id: int, session_id: int, query: str, mode: str, generate_voice: bool = False, image_base64: str = None):
+def handle_conversation(user_id: int, session_id: int, query: str, mode: str, image_base64: str = None):
     conn = get_db()
     cur = conn.cursor()
 
@@ -373,7 +378,7 @@ def handle_conversation(user_id: int, session_id: int, query: str, mode: str, ge
     if any(trigger in clean for trigger in creator_triggers):
         is_hindi = any(w in clean for w in ["kisne", "kisme", "banaya", "tumhe", "kaun"])
         if is_hindi:
-            reply = "Mujhe Utkarsh Bandhu ne bohot intellect aur vision ke sath banaya hai. Unhone hi mera cognitive aur vision system develop kiya hai."
+            reply = "Mujhe Utkarsh Bandhu ne banaya hai. Unhone hi mera cognitive intellect aur vision error-detection engine develop kiya hai."
         else:
             reply = "I was envisioned, created, and developed by Utkarsh Bandhu. He architected my cognitive reasoning and vision error-detection engine."
         emotion = "Brilliant"
@@ -388,20 +393,22 @@ def handle_conversation(user_id: int, session_id: int, query: str, mode: str, ge
     conn.commit()
     conn.close()
 
+    # ALWAYS GENERATE AUDIO SPEECH RESPONSE
     audio_base64 = None
-    if generate_voice:
-        try:
-            speech_clean = re.sub(r'[*#|_>`]', '', reply)
-            speech_clean = re.sub(r'\n+', ' ', speech_clean).strip()
-            tts_lang = detect_tts_language(speech_clean)
-            reply_audio = "app_reply.mp3"
-            tts = gTTS(text=speech_clean, lang=tts_lang, slow=False)
-            tts.save(reply_audio)
-            with open(reply_audio, "rb") as f:
-                audio_b64 = base64.b64encode(f.read()).decode("utf-8")
-            audio_base64 = f"data:audio/mp3;base64,{audio_b64}"
-        except Exception as e:
-            print("TTS Error:", e)
+    try:
+        speech_clean = re.sub(r'[*#|_>`]', '', reply)
+        speech_clean = re.sub(r'\n+', ' ', speech_clean).strip()
+        tts_lang = detect_tts_language(speech_clean)
+        # Limit spoken text size to avoid latency
+        spoken_snippet = speech_clean[:600]
+        reply_audio = "app_reply.mp3"
+        tts = gTTS(text=spoken_snippet, lang=tts_lang, slow=False)
+        tts.save(reply_audio)
+        with open(reply_audio, "rb") as f:
+            audio_b64 = base64.b64encode(f.read()).decode("utf-8")
+        audio_base64 = f"data:audio/mp3;base64,{audio_b64}"
+    except Exception as e:
+        print("TTS Audio Synthesis Error:", e)
 
     return reply, emotion, session_id, title, audio_base64
 
@@ -411,14 +418,13 @@ async def text_process(
     user_id: str = Form("1"),
     session_id: str = Form("0"),
     mode: str = Form("musashi"),
-    voice_enabled: str = Form("false"),
     image_base64: str = Form(None)
 ):
     u_id = int(user_id) if str(user_id).isdigit() else 1
     s_id = int(session_id) if str(session_id).isdigit() else 0
-    v_on = str(voice_enabled).lower() == "true"
+    img = image_base64 if (image_base64 and image_base64 != "null" and len(image_base64.strip()) > 50) else None
 
-    reply_text, emotion, res_s_id, title, audio_base64 = handle_conversation(u_id, s_id, text, mode, v_on, image_base64)
+    reply_text, emotion, res_s_id, title, audio_base64 = handle_conversation(u_id, s_id, text, mode, img)
     return JSONResponse({
         "user_text": text,
         "reply_text": reply_text,
@@ -434,12 +440,11 @@ async def voice_process(
     user_id: str = Form("1"),
     session_id: str = Form("0"),
     mode: str = Form("musashi"),
-    voice_enabled: str = Form("false"),
     image_base64: str = Form(None)
 ):
     u_id = int(user_id) if str(user_id).isdigit() else 1
     s_id = int(session_id) if str(session_id).isdigit() else 0
-    v_on = str(voice_enabled).lower() == "true"
+    img = image_base64 if (image_base64 and image_base64 != "null" and len(image_base64.strip()) > 50) else None
 
     temp_audio = "app_input.wav"
     with open(temp_audio, "wb") as f:
@@ -455,9 +460,9 @@ async def voice_process(
             )
             user_text = str(transcription).strip()
     except Exception as e:
-        print("Whisper Error:", e)
+        print("Whisper STT Error:", e)
 
-    reply_text, emotion, res_s_id, title, audio_base64 = handle_conversation(u_id, s_id, user_text, mode, v_on, image_base64)
+    reply_text, emotion, res_s_id, title, audio_base64 = handle_conversation(u_id, s_id, user_text, mode, img)
 
     return JSONResponse({
         "user_text": user_text,
@@ -474,7 +479,7 @@ async def read_aloud(text: str = Form(...)):
     speech_clean = re.sub(r'\n+', ' ', speech_clean).strip()
     tts_lang = detect_tts_language(speech_clean)
     reply_audio = "single_reply.mp3"
-    tts = gTTS(text=speech_clean, lang=tts_lang, slow=False)
+    tts = gTTS(text=speech_clean[:700], lang=tts_lang, slow=False)
     tts.save(reply_audio)
     with open(reply_audio, "rb") as f:
         audio_b64 = base64.b64encode(f.read()).decode("utf-8")
@@ -488,7 +493,7 @@ async def serve_app():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Lemon AI | Vision, Mistake Detector & Cores</title>
+        <title>Lemon AI | Vision Precision & Spoken Audio</title>
         <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
         <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
         <style>
@@ -625,11 +630,6 @@ async def serve_app():
                 color: #fff; border-color: #f87171; box-shadow: 0 0 14px var(--musashi-glow);
             }
 
-            .voice-setting-card {
-                display: flex; align-items: center; justify-content: space-between; padding: 10px 12px;
-                background: rgba(30, 41, 59, 0.5); border: 1px solid var(--card-border); border-radius: 12px;
-            }
-
             .chat-container {
                 flex: 1; overflow-y: scroll; padding: 24px 24px 34px; display: flex; flex-direction: column; gap: 18px; position: relative;
             }
@@ -676,11 +676,6 @@ async def serve_app():
             .bubble-group.lemon { align-self: flex-start; }
             .bubble-group.user { align-self: flex-end; }
 
-            .bubble-meta {
-                display: flex; align-items: center; justify-content: space-between; font-size: 11px;
-                color: var(--text-muted); margin-bottom: 5px; padding: 0 4px;
-            }
-
             .bubble {
                 padding: 15px 18px; border-radius: 20px; font-size: 14.5px; line-height: 1.65; white-space: normal; word-break: break-word;
             }
@@ -689,21 +684,18 @@ async def serve_app():
                 box-shadow: 0 4px 20px rgba(0,0,0,0.3);
             }
             .bubble.user {
-                background: linear-gradient(135deg, #facc15, #f59e0b); color: #0b0f19; font-weight: 600; border-bottom-right-radius: 4px;
+                background: linear-gradient(135deg, #facc15 0%, #f59e0b 100%); color: #0b0f19; font-weight: 600; border-bottom-right-radius: 4px;
                 box-shadow: 0 4px 16px var(--primary-glow);
             }
 
             .chat-img-thumb {
-                max-width: 240px; border-radius: 12px; margin-bottom: 8px; border: 1px solid rgba(255, 255, 255, 0.2); display: block;
+                max-width: 260px; border-radius: 12px; margin-bottom: 10px; border: 1px solid rgba(255, 255, 255, 0.2); display: block;
             }
 
             .bubble.lemon h1, .bubble.lemon h2, .bubble.lemon h3 {
                 margin: 10px 0 6px; font-size: 15.5px; color: #fde047; font-weight: 700;
             }
             .bubble.lemon p { margin-bottom: 8px; }
-            .bubble.lemon p:last-child { margin-bottom: 0; }
-            .bubble.lemon ul, .bubble.lemon ol { margin: 6px 0 10px 18px; }
-            .bubble.lemon li { margin-bottom: 4px; }
             .bubble.lemon pre {
                 background: var(--code-bg); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px;
                 padding: 12px; overflow-x: auto; font-family: 'JetBrains Mono', monospace; font-size: 13px; margin: 10px 0;
@@ -739,27 +731,27 @@ async def serve_app():
             .tdot:nth-child(2) { animation-delay: -0.16s; }
             @keyframes dotB { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
 
-            /* --- CAMERA MODAL & PREVIEW DOCK --- */
+            /* Camera Modal */
             .camera-modal {
                 position: fixed; inset: 0; background: rgba(5,7,15,0.95); z-index: 2500;
                 display: none; flex-direction: column; align-items: center; justify-content: center; padding: 20px;
             }
             .camera-box {
                 background: var(--card-surface); border: 1px solid var(--card-border); border-radius: 20px;
-                padding: 16px; width: 100%; max-width: 440px; display: flex; flex-direction: column; align-items: center; gap: 12px;
+                padding: 18px; width: 100%; max-width: 440px; display: flex; flex-direction: column; align-items: center; gap: 12px;
             }
             .camera-video {
-                width: 100%; max-height: 280px; border-radius: 14px; background: #000; object-fit: cover;
+                width: 100%; height: 260px; border-radius: 14px; background: #000; object-fit: cover;
             }
             .camera-ctrls { display: flex; gap: 10px; width: 100%; justify-content: center; }
 
             .img-preview-bar {
                 display: none; align-items: center; gap: 10px; padding: 6px 14px; margin-bottom: 6px;
-                background: rgba(24, 32, 50, 0.9); border: 1px solid rgba(250, 204, 21, 0.35); border-radius: 16px; width: fit-content;
+                background: rgba(24, 32, 50, 0.95); border: 1px solid rgba(250, 204, 21, 0.4); border-radius: 16px; width: fit-content;
             }
-            .img-preview-bar img { width: 36px; height: 36px; border-radius: 8px; object-fit: cover; }
-            .img-preview-bar span { font-size: 12px; color: #facc15; }
-            .img-remove-btn { color: #f87171; cursor: pointer; font-size: 14px; font-weight: 700; }
+            .img-preview-bar img { width: 40px; height: 40px; border-radius: 8px; object-fit: cover; }
+            .img-preview-bar span { font-size: 12.5px; color: #facc15; font-weight: 600; }
+            .img-remove-btn { color: #f87171; cursor: pointer; font-size: 15px; font-weight: 700; }
 
             .bottom-dock {
                 padding: 10px 20px 18px; background: rgba(9, 13, 22, 0.94); backdrop-filter: blur(20px); border-top: 1px solid var(--card-border);
@@ -785,16 +777,15 @@ async def serve_app():
         </style>
     </head>
     <body>
-        <!-- Camera Snapshot Modal -->
         <div class="camera-modal" id="cameraModal">
             <div class="camera-box">
-                <h3 style="font-size:16px;">📷 Scan Image & Find Mistakes</h3>
+                <h3 style="font-size:16px;">📷 Scan Image & Spot Mistakes</h3>
                 <video class="camera-video" id="cameraVideo" autoplay playsinline></video>
                 <canvas id="cameraCanvas" style="display:none;"></canvas>
                 <div class="camera-ctrls">
                     <button class="new-chat-btn" onclick="captureSnapshot()">📸 Capture</button>
                     <label class="new-chat-btn" style="cursor:pointer;">
-                        📁 Upload File
+                        📁 Upload Photo
                         <input type="file" id="fileUploadInput" accept="image/*" style="display:none;" onchange="handleFileUpload(event)">
                     </label>
                     <button class="new-chat-btn" style="background:#ef4444; color:#fff;" onclick="closeCamera()">✕ Close</button>
@@ -847,12 +838,6 @@ async def serve_app():
             <div class="sidebar-section-title">Saved Chats (Never Wipes)</div>
             <div class="sessions-list" id="sessionsList"></div>
 
-            <div class="sidebar-section-title">Voice Output</div>
-            <div class="voice-setting-card">
-                <span style="font-size:13px; font-weight:600;">Audio Synthesis</span>
-                <button class="new-chat-btn" id="sidebarVoiceBtn" style="padding:4px 10px;" onclick="toggleVoiceSetting()">OFF</button>
-            </div>
-
             <div style="margin-top:auto; padding-top:14px; border-top:1px solid var(--card-border);">
                 <div style="font-size:12px; color:#94a3b8; margin-bottom:6px;">Signed in as: <b id="sidebarUsername" style="color:#fff;">Guest</b></div>
                 <button class="new-chat-btn" style="width:100%; justify-content:center; color:#f87171; border-color:rgba(248,113,113,0.3); background:none;" onclick="logout()">Logout</button>
@@ -875,7 +860,7 @@ async def serve_app():
             <div class="hero-greeting" id="heroGreeting">
                 <div class="hero-logo">🍋</div>
                 <div class="hero-title" id="heroGreetingName">Enter The Arena</div>
-                <div class="hero-sub">Upload an image of your math, code, or homework to detect mistakes and get step-by-step corrections.</div>
+                <div class="hero-sub">Upload a photo of your homework, code, or math. Lemon will detect errors and speak out the exact correction.</div>
                 <div class="hero-badge">
                     <span>⚡</span> Architected by Utkarsh Bandhu
                 </div>
@@ -883,7 +868,7 @@ async def serve_app():
                 <div class="starter-cards">
                     <div class="starter-card musashi-card" onclick="openCamera()">
                         <div class="starter-card-title">📷 Scan & Fix Mistakes</div>
-                        <div class="starter-card-desc">Click camera or upload photo to analyze errors</div>
+                        <div class="starter-card-desc">Click to snap photo or upload image file</div>
                     </div>
                     <div class="starter-card" onclick="runStarterPrompt('Feynman technique se mujhe thermodynamics ka Second Law step-by-step samjha do.')">
                         <div class="starter-card-title">📚 Study Mentor</div>
@@ -902,17 +887,16 @@ async def serve_app():
         </main>
 
         <footer class="bottom-dock">
-            <!-- Active Image Attachment Indicator -->
             <div class="img-preview-bar" id="imgPreviewBar">
                 <img id="imgPreviewThumb" src="" alt="preview">
-                <span>Photo Attached (Mistake Detection Active)</span>
+                <span>Photo Ready (Vision Precision Active)</span>
                 <span class="img-remove-btn" onclick="clearAttachedImage()">✕</span>
             </div>
 
             <div class="dock-status" id="dockStatus">● Ready in Musashi Mode</div>
             <div class="input-dock">
-                <button class="dock-btn cam-btn" onclick="openCamera()" title="Camera / Scan Homework">📷</button>
-                <input type="text" id="textInput" placeholder="Ask a question or scan mistakes with 📷..." onkeydown="if(event.key==='Enter') sendTextQuery()" />
+                <button class="dock-btn cam-btn" onclick="openCamera()" title="Camera / Scan Photo">📷</button>
+                <input type="text" id="textInput" placeholder="Pose question or attach photo with 📷..." onkeydown="if(event.key==='Enter') sendTextQuery()" />
                 <button class="dock-btn mic-btn" id="micBtn" onclick="toggleVoice()" title="Record Voice">🎙️</button>
                 <button class="dock-btn send-btn" onclick="sendTextQuery()" title="Send">➤</button>
             </div>
@@ -925,14 +909,11 @@ async def serve_app():
             let currentUsername = localStorage.getItem("lemon_username") || "Guest";
             let currentSessionId = parseInt(localStorage.getItem("lemon_current_session_id") || "0");
             let activeCore = localStorage.getItem("lemon_active_core") || "musashi";
-            let isVoiceEnabled = localStorage.getItem("lemon_voice_enabled") === "true";
-            let isAuthRegister = false;
             let isRecording = false;
             let mediaRecorder = null;
             let audioChunks = [];
             let currentThinkingEl = null;
 
-            // Vision Camera State
             let attachedImageBase64 = null;
             let cameraStream = null;
 
@@ -944,7 +925,6 @@ async def serve_app():
             const micBtn = document.getElementById("micBtn");
             const dockStatus = document.getElementById("dockStatus");
             const audioElement = document.getElementById("audioElement");
-            const sidebarVoiceBtn = document.getElementById("sidebarVoiceBtn");
             const sidebarUsername = document.getElementById("sidebarUsername");
             const sessionsList = document.getElementById("sessionsList");
             const heroGreeting = document.getElementById("heroGreeting");
@@ -956,19 +936,24 @@ async def serve_app():
             const imgPreviewBar = document.getElementById("imgPreviewBar");
             const imgPreviewThumb = document.getElementById("imgPreviewThumb");
 
-            /* ============================================================
-               CAMERA VISION & FILE UPLOAD HANDLERS
-               ============================================================ */
+            /* CAMERA WITH FALLBACK FOR LAPTOP & MOBILE */
             async function openCamera() {
                 cameraModal.style.display = "flex";
                 try {
+                    // Try back camera on mobile, fallback to laptop camera
                     cameraStream = await navigator.mediaDevices.getUserMedia({
-                        video: { facingMode: "environment" }
+                        video: { facingMode: { ideal: "environment" } }
                     });
                     cameraVideo.srcObject = cameraStream;
-                } catch (err) {
-                    console.log("Webcam direct stream error:", err);
-                    document.getElementById("fileUploadInput").click();
+                } catch(e) {
+                    try {
+                        cameraStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                        cameraVideo.srcObject = cameraStream;
+                    } catch(err) {
+                        console.log("No webcam available, opening file upload:", err);
+                        closeCamera();
+                        document.getElementById("fileUploadInput").click();
+                    }
                 }
             }
 
@@ -980,14 +965,44 @@ async def serve_app():
                 cameraModal.style.display = "none";
             }
 
-            function captureSnapshot() {
+            /* COMPRESS AND RESIZE IMAGE TO ENSURE FAST VISION RESPONSE */
+            function resizeImage(source, maxWidth = 1024, maxHeight = 1024, quality = 0.8) {
+                return new Promise((resolve) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        let width = img.width;
+                        let height = img.height;
+                        if (width > height) {
+                            if (width > maxWidth) {
+                                height = Math.round((height * maxWidth) / width);
+                                width = maxWidth;
+                            }
+                        } else {
+                            if (height > maxHeight) {
+                                width = Math.round((width * maxHeight) / height);
+                                height = maxHeight;
+                            }
+                        }
+                        const canvas = document.createElement("canvas");
+                        canvas.width = width;
+                        canvas.height = height;
+                        const ctx = canvas.getContext("2d");
+                        ctx.drawImage(img, 0, 0, width, height);
+                        resolve(canvas.toDataURL("image/jpeg", quality));
+                    };
+                    img.src = source;
+                });
+            }
+
+            async function captureSnapshot() {
                 if (!cameraVideo.videoWidth) return;
                 cameraCanvas.width = cameraVideo.videoWidth;
                 cameraCanvas.height = cameraVideo.videoHeight;
                 const ctx = cameraCanvas.getContext("2d");
                 ctx.drawImage(cameraVideo, 0, 0);
-                attachedImageBase64 = cameraCanvas.toDataURL("image/jpeg", 0.85);
-                setAttachedImage(attachedImageBase64);
+                const rawB64 = cameraCanvas.toDataURL("image/jpeg", 0.9);
+                const optimizedB64 = await resizeImage(rawB64);
+                setAttachedImage(optimizedB64);
                 closeCamera();
             }
 
@@ -995,9 +1010,9 @@ async def serve_app():
                 const file = e.target.files[0];
                 if (!file) return;
                 const reader = new FileReader();
-                reader.onload = (event) => {
-                    attachedImageBase64 = event.target.result;
-                    setAttachedImage(attachedImageBase64);
+                reader.onload = async (event) => {
+                    const optimizedB64 = await resizeImage(event.target.result);
+                    setAttachedImage(optimizedB64);
                     closeCamera();
                 };
                 reader.readAsDataURL(file);
@@ -1007,7 +1022,7 @@ async def serve_app():
                 attachedImageBase64 = b64;
                 imgPreviewThumb.src = b64;
                 imgPreviewBar.style.display = "flex";
-                dockStatus.innerText = "● Photo attached. Lemon will detect and correct mistakes.";
+                dockStatus.innerText = "● Photo ready. Lemon Vision will detect and correct errors.";
             }
 
             function clearAttachedImage() {
@@ -1016,13 +1031,11 @@ async def serve_app():
                 dockStatus.innerText = "● Ready in " + activeCore.toUpperCase() + " Mode";
             }
 
-            /* ============================================================
-               INDEXEDDB PERSISTENCE (ZERO CHAT LOSS)
-               ============================================================ */
+            /* INDEXEDDB PERMANENCE */
             let idb = null;
             function initIndexedDB() {
                 return new Promise((resolve) => {
-                    const req = indexedDB.open("LemonPermanentDB", 4);
+                    const req = indexedDB.open("LemonPermanentDB", 5);
                     req.onupgradeneeded = (e) => {
                         const db = e.target.result;
                         if (!db.objectStoreNames.contains("sessions")) {
@@ -1041,8 +1054,7 @@ async def serve_app():
                 if (!idb) await initIndexedDB();
                 if (!idb) return;
                 const tx = idb.transaction("sessions", "readwrite");
-                const store = tx.objectStore("sessions");
-                store.put(sessionObj);
+                tx.objectStore("sessions").put(sessionObj);
             }
 
             async function getAllSessionsFromIDB(userId) {
@@ -1086,20 +1098,8 @@ async def serve_app():
                 dockStatus.innerText = `● Switched to ${core.toUpperCase()} core`;
             }
 
-            function updateVoiceUI() {
-                sidebarVoiceBtn.innerText = isVoiceEnabled ? "ON" : "OFF";
-            }
-
-            function toggleVoiceSetting() {
-                isVoiceEnabled = !isVoiceEnabled;
-                localStorage.setItem("lemon_voice_enabled", isVoiceEnabled);
-                updateVoiceUI();
-                dockStatus.innerText = isVoiceEnabled ? "● Voice replies turned ON" : "● Voice replies turned OFF";
-            }
-
             async function checkAuth() {
                 await initIndexedDB();
-                updateVoiceUI();
                 selectCore(activeCore);
                 if (localStorage.getItem("lemon_user_id")) {
                     authModal.style.display = "none";
@@ -1292,7 +1292,7 @@ async def serve_app():
                         currentThinkingEl.innerHTML = `
                             <div class="thinking-box">
                                 <div class="tdot"></div><div class="tdot"></div><div class="tdot"></div>
-                                <span style="font-size:12px; color:#facc15; margin-left:4px;">Inspecting flaws...</span>
+                                <span style="font-size:12px; color:#facc15; margin-left:4px;">Analyzing precision...</span>
                             </div>
                         `;
                         chatStream.appendChild(currentThinkingEl);
@@ -1308,7 +1308,7 @@ async def serve_app():
             }
 
             async function playSpecificMessage(text) {
-                dockStatus.innerText = "🔊 Generating voice...";
+                dockStatus.innerText = "🔊 Synthesizing speech...";
                 const fd = new FormData();
                 fd.append("text", text);
                 try {
@@ -1356,7 +1356,7 @@ async def serve_app():
                             ${imgTag}
                             <div>${formattedContent}</div>
                             <div class="message-actions">
-                                <button class="msg-action-btn" onclick="playSpecificMessage(decodeURIComponent('${safeRaw}'))">🔊 Read Aloud</button>
+                                <button class="msg-action-btn" onclick="playSpecificMessage(decodeURIComponent('${safeRaw}'))">🔊 Play Voice</button>
                                 <button class="msg-action-btn" onclick="copyMessage(decodeURIComponent('${safeRaw}'), this)">📋 Copy</button>
                             </div>
                         </div>
@@ -1385,15 +1385,14 @@ async def serve_app():
                 if (!text && !imageToSend) return;
 
                 textInput.value = "";
-                appendMessage("user", text ? text : "Scan this image and correct the mistakes.", null, imageToSend);
+                appendMessage("user", text ? text : "Scan this photo and pinpoint every error with the exact fix.", null, imageToSend);
                 setThinking(true, imageToSend ? "Vision Engine: Detecting mistakes..." : "Engaging " + activeCore.toUpperCase() + " focus...");
 
                 const fd = new FormData();
-                fd.append("text", text ? text : "Examine this image. Spot all errors, calculations, or logic flaws, explain why, and write out the exact fix.");
+                fd.append("text", text ? text : "Examine this image line-by-line. Spot all errors, calculations, or logic flaws, explain why, and write out the exact fix.");
                 fd.append("user_id", currentUserId.toString());
                 fd.append("session_id", (currentSessionId || 0).toString());
                 fd.append("mode", activeCore);
-                fd.append("voice_enabled", isVoiceEnabled ? "true" : "false");
                 if (imageToSend) {
                     fd.append("image_base64", imageToSend);
                 }
@@ -1417,9 +1416,11 @@ async def serve_app():
                     await saveSessionToIDB(curr);
 
                     appendMessage("lemon", data.reply_text, data.emotion);
-                    if (isVoiceEnabled && data.audio_base64) {
+
+                    // ALWAYS PLAY SPOKEN AUDIO RESPONSE
+                    if (data.audio_base64) {
                         audioElement.src = data.audio_base64;
-                        audioElement.play();
+                        audioElement.play().catch(e => console.log("Audio auto-play policy:", e));
                     }
                 } catch(e) {
                     console.error("Text process error:", e);
@@ -1438,7 +1439,7 @@ async def serve_app():
                         mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
                         mediaRecorder.onstop = async () => {
                             const blob = new Blob(audioChunks, { type: 'audio/wav' });
-                            setThinking(true, "Transcribing words...");
+                            setThinking(true, "Transcribing voice words...");
                             uploadVoice(blob);
                             stream.getTracks().forEach(t => t.stop());
                         };
@@ -1467,7 +1468,6 @@ async def serve_app():
                 fd.append("user_id", currentUserId.toString());
                 fd.append("session_id", (currentSessionId || 0).toString());
                 fd.append("mode", activeCore);
-                fd.append("voice_enabled", isVoiceEnabled ? "true" : "false");
                 if (imageToSend) {
                     fd.append("image_base64", imageToSend);
                 }
@@ -1493,9 +1493,11 @@ async def serve_app():
                     await saveSessionToIDB(curr);
 
                     appendMessage("lemon", data.reply_text, data.emotion);
-                    if (isVoiceEnabled && data.audio_base64) {
+
+                    // ALWAYS PLAY AUDIO FOR VOICE NOTE
+                    if (data.audio_base64) {
                         audioElement.src = data.audio_base64;
-                        audioElement.play();
+                        audioElement.play().catch(e => console.log("Audio auto-play policy:", e));
                     }
                 } catch(e) {
                     console.error("Voice process error:", e);
