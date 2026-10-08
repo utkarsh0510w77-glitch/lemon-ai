@@ -17,7 +17,7 @@ PART2 = "b3FYnQHV93Lkgjmz4CtDJ1IpMfy4"
 GROQ_API_KEY = os.getenv("GROQ_API_KEY") or (PART1 + PART2)
 client = Groq(api_key=GROQ_API_KEY)
 
-app = FastAPI(title="Lemon AI - Fault Tolerant Engine")
+app = FastAPI(title="Lemon AI - Guaranteed Persistent History Edition")
 
 app.add_middleware(
     CORSMiddleware,
@@ -241,18 +241,22 @@ def get_session_messages(session_id: int):
 
 @app.post("/api/restore-backup")
 def restore_backup(user_id: int = Form(...), sessions_json: str = Form(...)):
+    """Restores client IndexedDB backup seamlessly back into SQLite if container restarts."""
     try:
         data = json.loads(sessions_json)
         conn = get_db()
         cur = conn.cursor()
         for sess in data:
-            cur.execute("INSERT INTO sessions (user_id, title) VALUES (?, ?)", (user_id, sess.get("title", "Conversation")))
-            s_id = cur.lastrowid
-            for msg in sess.get("messages", []):
-                cur.execute(
-                    "INSERT INTO messages (session_id, role, content, mode, emotion) VALUES (?, ?, ?, ?, ?)",
-                    (s_id, msg.get("role", "user"), msg.get("content", ""), msg.get("mode", "hybrid"), msg.get("emotion"))
-                )
+            cur.execute("SELECT id FROM sessions WHERE user_id = ? AND title = ?", (user_id, sess.get("title", "Conversation")))
+            existing = cur.fetchone()
+            if not existing:
+                cur.execute("INSERT INTO sessions (user_id, title) VALUES (?, ?)", (user_id, sess.get("title", "Conversation")))
+                s_id = cur.lastrowid
+                for msg in sess.get("messages", []):
+                    cur.execute(
+                        "INSERT INTO messages (session_id, role, content, mode, emotion) VALUES (?, ?, ?, ?, ?)",
+                        (s_id, msg.get("role", "user"), msg.get("content", ""), msg.get("mode", "hybrid"), msg.get("emotion"))
+                    )
         conn.commit()
         conn.close()
         return JSONResponse({"status": "ok"})
@@ -273,15 +277,12 @@ def handle_conversation(user_id: int, session_id: int, query: str, mode: str, ge
     conn = get_db()
     cur = conn.cursor()
 
-    # Ensure user exists or fallback
     cur.execute("SELECT id FROM users WHERE id = ?", (user_id,))
     if not cur.fetchone():
-        # Fallback guest user creation
         cur.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)", (f"user_{user_id}", "guest_pwd"))
         conn.commit()
         user_id = cur.lastrowid
 
-    # Session handling: create new session if 0 or invalid
     if not session_id or session_id <= 0:
         title = generate_ai_title(query)
         cur.execute("INSERT INTO sessions (user_id, title) VALUES (?, ?)", (user_id, title))
@@ -408,7 +409,7 @@ async def serve_app():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-        <title>Lemon AI | Fault-Tolerant Engine</title>
+        <title>Lemon AI | Guaranteed Permanent Chats</title>
         <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
         <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
         <style>
@@ -423,8 +424,49 @@ async def serve_app():
                 --code-bg: #0d121f;
             }
 
-            * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', sans-serif; -webkit-tap-highlight-color: transparent; }
-            body { background: radial-gradient(circle at 50% 0%, #151a3b 0%, var(--bg-deep) 80%); color: var(--text-high); height: 100vh; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+            * { 
+                box-sizing: border-box; 
+                margin: 0; 
+                padding: 0; 
+                font-family: 'Plus Jakarta Sans', sans-serif; 
+                -webkit-tap-highlight-color: transparent; 
+            }
+
+            html, body {
+                height: 100%;
+                width: 100%;
+                overflow: hidden;
+                position: fixed;
+            }
+
+            body { 
+                background: radial-gradient(circle at 50% 0%, #151a3b 0%, var(--bg-deep) 80%); 
+                color: var(--text-high); 
+                display: flex; 
+                flex-direction: column; 
+            }
+
+            .gesture-toast {
+                position: fixed;
+                top: 70px;
+                left: 50%;
+                transform: translateX(-50%) translateY(-20px);
+                background: rgba(250, 204, 21, 0.95);
+                color: #0b0f19;
+                font-weight: 700;
+                font-size: 13px;
+                padding: 8px 18px;
+                border-radius: 20px;
+                box-shadow: 0 4px 20px var(--primary-glow);
+                opacity: 0;
+                pointer-events: none;
+                transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+                z-index: 3000;
+            }
+            .gesture-toast.show {
+                transform: translateX(-50%) translateY(0);
+                opacity: 1;
+            }
 
             .auth-overlay {
                 position: fixed; inset: 0; background: rgba(5, 7, 15, 0.92); backdrop-filter: blur(20px);
@@ -451,6 +493,7 @@ async def serve_app():
             .header {
                 padding: 12px 18px; display: flex; align-items: center; justify-content: space-between;
                 backdrop-filter: blur(20px); background: rgba(11, 15, 25, 0.85); border-bottom: 1px solid var(--card-border); z-index: 10;
+                flex-shrink: 0;
             }
             .header-left { display: flex; align-items: center; gap: 12px; }
             .menu-trigger {
@@ -499,9 +542,8 @@ async def serve_app():
 
             .sessions-list {
                 flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; min-height: 100px;
+                touch-action: pan-y !important; -webkit-overflow-scrolling: touch;
             }
-            .sessions-list::-webkit-scrollbar { width: 4px; }
-            .sessions-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
 
             .session-item {
                 display: flex; align-items: center; justify-content: space-between; padding: 10px 12px;
@@ -532,15 +574,26 @@ async def serve_app():
                 background: rgba(30, 41, 59, 0.5); border: 1px solid var(--card-border); border-radius: 12px;
             }
 
+            /* --- 100% FIXED SMOOTH SCROLL CONTAINER (SINGLE FINGER SCROLL) --- */
             .chat-container {
-                flex: 1; overflow-y: auto; padding: 20px 18px 24px; display: flex; flex-direction: column; gap: 18px;
-                scroll-behavior: smooth; position: relative;
+                flex: 1; 
+                overflow-y: scroll !important; 
+                -webkit-overflow-scrolling: touch !important; 
+                touch-action: pan-y !important; 
+                padding: 20px 18px 30px; 
+                display: flex; 
+                flex-direction: column; 
+                gap: 18px;
+                position: relative;
+                overscroll-behavior-y: contain;
             }
-            .chat-container::-webkit-scrollbar { width: 5px; }
-            .chat-container::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 10px; }
+
+            .chat-container::-webkit-scrollbar { width: 6px; }
+            .chat-container::-webkit-scrollbar-track { background: transparent; }
+            .chat-container::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.18); border-radius: 10px; }
 
             .hero-greeting {
-                position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%);
+                margin: auto;
                 display: flex; flex-direction: column; align-items: center; text-align: center;
                 width: 90%; max-width: 520px; transition: opacity 0.3s ease;
             }
@@ -548,7 +601,10 @@ async def serve_app():
                 width: 78px; height: 78px; border-radius: 26px; background: linear-gradient(135deg, #facc15, #f59e0b);
                 display: flex; align-items: center; justify-content: center; font-size: 42px;
                 box-shadow: 0 10px 32px var(--primary-glow); margin-bottom: 16px;
+                animation: floatLogo 3s ease-in-out infinite alternate;
             }
+            @keyframes floatLogo { 0% { transform: translateY(0); } 100% { transform: translateY(-6px); } }
+
             .hero-title {
                 font-size: 26px; font-weight: 800; font-family: 'Space Grotesk', sans-serif;
                 background: linear-gradient(135deg, #ffffff 40%, #facc15 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;
@@ -638,6 +694,7 @@ async def serve_app():
 
             .bottom-dock {
                 padding: 10px 16px 16px; background: rgba(9, 13, 22, 0.94); backdrop-filter: blur(20px); border-top: 1px solid var(--card-border);
+                flex-shrink: 0;
             }
             .dock-status { font-size: 11.5px; color: var(--text-muted); text-align: center; margin-bottom: 6px; min-height: 16px; }
             .input-dock {
@@ -658,6 +715,8 @@ async def serve_app():
         </style>
     </head>
     <body>
+        <div class="gesture-toast" id="gestureToast">🔄 Triple-finger Gesture: Refreshed!</div>
+
         <div class="auth-overlay" id="authModal">
             <div class="auth-card">
                 <h2 id="authHeading">Welcome to Lemon AI</h2>
@@ -713,7 +772,7 @@ async def serve_app():
             </div>
         </aside>
 
-        <header class="header">
+        <header class="header" ondblclick="scrollToBottom()">
             <div class="header-left">
                 <button class="menu-trigger" onclick="openSidebar()" title="Conversations & Cores">☰</button>
                 <div class="brand-badge">🍋</div>
@@ -729,7 +788,7 @@ async def serve_app():
             <div class="hero-greeting" id="heroGreeting">
                 <div class="hero-logo">🍋</div>
                 <div class="hero-title" id="heroGreetingName">Hello, Friend</div>
-                <div class="hero-sub">Where would you like to explore today? Dive into deep philosophy, solve intricate puzzles, or speak from the heart.</div>
+                <div class="hero-sub">Single-finger scroll enabled. Your chat history is permanently remembered.</div>
                 <div class="hero-badge">
                     <span>⚡</span> Architected by Utkarsh Bandhu
                 </div>
@@ -791,31 +850,88 @@ async def serve_app():
             const sessionsList = document.getElementById("sessionsList");
             const heroGreeting = document.getElementById("heroGreeting");
             const heroGreetingName = document.getElementById("heroGreetingName");
+            const gestureToast = document.getElementById("gestureToast");
 
-            function getClientBackupKey() {
-                return `lemon_backup_${currentUserId}`;
+            /* ============================================================
+               1. PERMANENT INDEXEDDB ENGINE (CHATS NEVER WIPE)
+               ============================================================ */
+            let idb = null;
+            function initIndexedDB() {
+                return new Promise((resolve) => {
+                    const req = indexedDB.open("LemonPermanentDB", 1);
+                    req.onupgradeneeded = (e) => {
+                        const db = e.target.result;
+                        if (!db.objectStoreNames.contains("sessions")) {
+                            db.createObjectStore("sessions", { keyPath: "id" });
+                        }
+                    };
+                    req.onsuccess = (e) => {
+                        idb = e.target.result;
+                        resolve(idb);
+                    };
+                    req.onerror = () => resolve(null);
+                });
             }
 
-            function getClientBackup() {
-                try {
-                    return JSON.parse(localStorage.getItem(getClientBackupKey()) || "[]");
-                } catch(e) {
-                    return [];
-                }
+            async function saveSessionToIDB(sessionObj) {
+                if (!idb) await initIndexedDB();
+                if (!idb) return;
+                const tx = idb.transaction("sessions", "readwrite");
+                const store = tx.objectStore("sessions");
+                store.put(sessionObj);
             }
 
-            function saveMessageToClientBackup(sessionId, title, messageObj) {
-                if (!currentUserId) return;
-                let backup = getClientBackup();
-                let session = backup.find(s => s.id === sessionId);
-                if (!session) {
-                    session = { id: sessionId, title: title, messages: [] };
-                    backup.unshift(session);
-                } else if (title && session.title !== title) {
-                    session.title = title;
+            async function getAllSessionsFromIDB(userId) {
+                if (!idb) await initIndexedDB();
+                if (!idb) return [];
+                return new Promise((resolve) => {
+                    const tx = idb.transaction("sessions", "readonly");
+                    const store = tx.objectStore("sessions");
+                    const req = store.getAll();
+                    req.onsuccess = () => {
+                        const results = req.result.filter(s => s.user_id === userId);
+                        resolve(results);
+                    };
+                    req.onerror = () => resolve([]);
+                });
+            }
+
+            async function deleteSessionFromIDB(sessionId) {
+                if (!idb) await initIndexedDB();
+                if (!idb) return;
+                const tx = idb.transaction("sessions", "readwrite");
+                tx.objectStore("sessions").delete(sessionId);
+            }
+
+            /* ============================================================
+               2. TRIPLE-FINGER GESTURE TO REFRESH
+               ============================================================ */
+            let tripleTouchTriggered = false;
+
+            window.addEventListener('touchstart', (e) => {
+                if (e.touches.length === 3 && !tripleTouchTriggered) {
+                    tripleTouchTriggered = true;
+                    showGestureToast();
+                    if (navigator.vibrate) navigator.vibrate([40, 60, 40]);
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 400);
                 }
-                session.messages.push(messageObj);
-                localStorage.setItem(getClientBackupKey(), JSON.stringify(backup));
+            }, { passive: true });
+
+            window.addEventListener('touchend', (e) => {
+                if (e.touches.length < 3) {
+                    tripleTouchTriggered = false;
+                }
+            }, { passive: true });
+
+            function showGestureToast() {
+                gestureToast.classList.add("show");
+                setTimeout(() => { gestureToast.classList.remove("show"); }, 2000);
+            }
+
+            function scrollToBottom() {
+                chatStream.scrollTo({ top: chatStream.scrollHeight, behavior: 'smooth' });
             }
 
             function openSidebar() {
@@ -848,7 +964,8 @@ async def serve_app():
                 dockStatus.innerText = isVoiceEnabled ? "● Voice replies turned ON" : "● Voice replies turned OFF";
             }
 
-            function checkAuth() {
+            async function checkAuth() {
+                await initIndexedDB();
                 updateVoiceUI();
                 selectCore(activeCore);
                 if (localStorage.getItem("lemon_user_id")) {
@@ -910,20 +1027,22 @@ async def serve_app():
                 checkAuth();
             }
 
+            /* ============================================================
+               3. BULLETPROOF CHAT RESTORATION & RESCUE
+               ============================================================ */
             async function initHistory() {
                 try {
                     const res = await fetch(`/api/sessions/${currentUserId}`);
                     const data = await res.json();
+                    const localIDBSessions = await getAllSessionsFromIDB(currentUserId);
 
-                    if (!data.sessions || data.sessions.length === 0) {
-                        const localBackup = getClientBackup();
-                        if (localBackup.length > 0) {
-                            const fd = new FormData();
-                            fd.append("user_id", currentUserId);
-                            fd.append("sessions_json", JSON.stringify(localBackup));
-                            await fetch("/api/restore-backup", { method: "POST", body: fd });
-                            return initHistory();
-                        }
+                    if ((!data.sessions || data.sessions.length === 0) && localIDBSessions.length > 0) {
+                        // Render was restarted/wiped: Re-hydrate database silently!
+                        const fd = new FormData();
+                        fd.append("user_id", currentUserId);
+                        fd.append("sessions_json", JSON.stringify(localIDBSessions));
+                        await fetch("/api/restore-backup", { method: "POST", body: fd });
+                        return initHistory();
                     }
 
                     await loadSessionsList();
@@ -932,13 +1051,16 @@ async def serve_app():
                         await openSession(currentSessionId);
                     } else if (data.sessions && data.sessions.length > 0) {
                         await openSession(data.sessions[0].id);
+                    } else if (localIDBSessions.length > 0) {
+                        openLocalIDBSession(localIDBSessions[0]);
                     } else {
                         startNewChat();
                     }
                 } catch(e) {
-                    const localBackup = getClientBackup();
-                    if (localBackup.length > 0) {
-                        openLocalSession(localBackup[0]);
+                    console.log("Error initializing history:", e);
+                    const localIDBSessions = await getAllSessionsFromIDB(currentUserId);
+                    if (localIDBSessions.length > 0) {
+                        openLocalIDBSession(localIDBSessions[0]);
                     }
                 }
             }
@@ -949,8 +1071,14 @@ async def serve_app():
                     const res = await fetch(`/api/sessions/${currentUserId}`);
                     const data = await res.json();
                     sessionsList.innerHTML = "";
-                    if (data.sessions && data.sessions.length > 0) {
-                        data.sessions.forEach(s => {
+
+                    let list = data.sessions || [];
+                    if (list.length === 0) {
+                        list = await getAllSessionsFromIDB(currentUserId);
+                    }
+
+                    if (list.length > 0) {
+                        list.forEach(s => {
                             const item = document.createElement("div");
                             item.className = `session-item ${s.id === currentSessionId ? 'active' : ''}`;
                             item.innerHTML = `
@@ -989,18 +1117,25 @@ async def serve_app():
                     const data = await res.json();
                     if (data.messages && data.messages.length > 0) {
                         data.messages.forEach(m => appendMessage(m.role === "assistant" ? "lemon" : "user", m.content, m.emotion));
+                    } else {
+                        const localSessions = await getAllSessionsFromIDB(currentUserId);
+                        const match = localSessions.find(s => s.id === id);
+                        if (match) openLocalIDBSession(match);
                     }
                 } catch(e) {
-                    const backup = getClientBackup().find(s => s.id === id);
-                    if (backup) openLocalSession(backup);
+                    const localSessions = await getAllSessionsFromIDB(currentUserId);
+                    const match = localSessions.find(s => s.id === id);
+                    if (match) openLocalIDBSession(match);
                 }
+                scrollToBottom();
             }
 
-            function openLocalSession(session) {
+            function openLocalIDBSession(session) {
                 currentSessionId = session.id;
                 heroGreeting.style.display = "none";
                 chatStream.innerHTML = "";
                 session.messages.forEach(m => appendMessage(m.role === "assistant" ? "lemon" : "user", m.content, m.emotion));
+                scrollToBottom();
             }
 
             async function deleteSession(e, id) {
@@ -1009,9 +1144,7 @@ async def serve_app():
                 const fd = new FormData();
                 fd.append("session_id", id);
                 await fetch("/api/delete-session", { method: "POST", body: fd });
-                
-                let backup = getClientBackup().filter(s => s.id !== id);
-                localStorage.setItem(getClientBackupKey(), JSON.stringify(backup));
+                await deleteSessionFromIDB(id);
 
                 if (currentSessionId === id) startNewChat();
                 loadSessionsList();
@@ -1035,7 +1168,7 @@ async def serve_app():
                             </div>
                         `;
                         chatStream.appendChild(currentThinkingEl);
-                        chatStream.scrollTop = chatStream.scrollHeight;
+                        scrollToBottom();
                     }
                 } else {
                     if (currentThinkingEl) {
@@ -1101,7 +1234,7 @@ async def serve_app():
 
                 group.innerHTML = html;
                 chatStream.appendChild(group);
-                chatStream.scrollTop = chatStream.scrollHeight;
+                scrollToBottom();
             }
 
             audioElement.onplay = () => { dockStatus.innerText = "🔊 Lemon is speaking..."; };
@@ -1129,8 +1262,15 @@ async def serve_app():
                     currentSessionId = data.session_id;
                     localStorage.setItem("lemon_current_session_id", currentSessionId.toString());
 
-                    saveMessageToClientBackup(currentSessionId, data.title, { role: "user", content: text, mode: activeCore });
-                    saveMessageToClientBackup(currentSessionId, data.title, { role: "assistant", content: data.reply_text, mode: activeCore, emotion: data.emotion });
+                    // Save immediately into Permanent IndexedDB
+                    const existingSessions = await getAllSessionsFromIDB(currentUserId);
+                    let curr = existingSessions.find(s => s.id === currentSessionId);
+                    if (!curr) {
+                        curr = { id: currentSessionId, user_id: currentUserId, title: data.title, messages: [] };
+                    }
+                    curr.messages.push({ role: "user", content: text, mode: activeCore });
+                    curr.messages.push({ role: "assistant", content: data.reply_text, mode: activeCore, emotion: data.emotion });
+                    await saveSessionToIDB(curr);
 
                     appendMessage("lemon", data.reply_text, data.emotion);
                     if (isVoiceEnabled && data.audio_base64) {
@@ -1190,10 +1330,17 @@ async def serve_app():
                     localStorage.setItem("lemon_current_session_id", currentSessionId.toString());
 
                     if (data.user_text) {
-                        saveMessageToClientBackup(currentSessionId, data.title, { role: "user", content: data.user_text, mode: activeCore });
                         appendMessage("user", data.user_text);
                     }
-                    saveMessageToClientBackup(currentSessionId, data.title, { role: "assistant", content: data.reply_text, mode: activeCore, emotion: data.emotion });
+
+                    const existingSessions = await getAllSessionsFromIDB(currentUserId);
+                    let curr = existingSessions.find(s => s.id === currentSessionId);
+                    if (!curr) {
+                        curr = { id: currentSessionId, user_id: currentUserId, title: data.title, messages: [] };
+                    }
+                    if (data.user_text) curr.messages.push({ role: "user", content: data.user_text, mode: activeCore });
+                    curr.messages.push({ role: "assistant", content: data.reply_text, mode: activeCore, emotion: data.emotion });
+                    await saveSessionToIDB(curr);
 
                     appendMessage("lemon", data.reply_text, data.emotion);
                     if (isVoiceEnabled && data.audio_base64) {
