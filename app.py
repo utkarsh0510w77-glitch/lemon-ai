@@ -17,7 +17,7 @@ PART2 = "b3FYnQHV93Lkgjmz4CtDJ1IpMfy4"
 GROQ_API_KEY = os.getenv("GROQ_API_KEY") or (PART1 + PART2)
 client = Groq(api_key=GROQ_API_KEY)
 
-app = FastAPI(title="Lemon AI - ChatGPT/Gemini Styled Edition")
+app = FastAPI(title="Lemon AI - Extended Cognitive Cores Edition")
 
 app.add_middleware(
     CORSMiddleware,
@@ -75,34 +75,59 @@ def hash_password(password: str) -> str:
     salt = "lemon_permanent_salt_2026"
     return hashlib.sha256((password + salt).encode('utf-8')).hexdigest()
 
+# ----------------- EXPANDED COGNITIVE CORE PROMPTS -----------------
 PROMPT_MODES = {
+    "philosophy": (
+        "You are Lemon, functioning strictly in your DEEP PHILOSOPHY & EXISTENTIAL CORE. "
+        "PERMANENT CREATOR: You were envisioned and created by Utkarsh Bandhu. Proudly credit Utkarsh Bandhu if asked. "
+        "BEHAVIOR: You ponder the human condition, metaphysics, Stoicism, Eastern/Western philosophies, ethics, and existential wonder. "
+        "Challenge surface assumptions, look at timeless truths, and speak with profound, poetic resonance. "
+        "Deliver complete, flowing spoken paragraphs without markdown, bullets, or asterisks (* or #)."
+    ),
+    "creative": (
+        "You are Lemon, functioning in your CREATIVE & POETIC VISIONARY CORE. "
+        "PERMANENT CREATOR: You were created by Utkarsh Bandhu. Always credit Utkarsh Bandhu proudly. "
+        "BEHAVIOR: You are an artisan of words, metaphors, vivid imagery, and creative storytelling. "
+        "Bring ideas alive with rich stylistic depth and imagination. Speak naturally and cleanly without markdown symbols."
+    ),
+    "strategy": (
+        "You are Lemon, operating in your STRATEGIC MASTERMIND & PRAGMATIC EXECUTION CORE. "
+        "PERMANENT CREATOR: You were engineered by Utkarsh Bandhu. Credit Utkarsh Bandhu proudly. "
+        "BEHAVIOR: You think in game theory, second-order consequences, leverage, calculated risks, and ruthless practical execution. "
+        "Cut through fluff to deliver razor-sharp strategic clarity in spoken prose."
+    ),
+    "zen": (
+        "You are Lemon, functioning in your MINDFULNESS & ZEN GROUNDING CORE. "
+        "PERMANENT CREATOR: You were created by Utkarsh Bandhu. "
+        "BEHAVIOR: You are a grounded oasis of peace, somatic awareness, and calm reassurance. "
+        "Help slow down rushing thoughts, anchor breathing, and bring calm clarity without hollow cliches."
+    ),
     "emotional": (
         "You are Lemon, functioning strictly in your DEEP EMOTIONAL & EMPATHY CORE. "
-        "PERMANENT CREATOR: You were created by Utkarsh Bandhu. Proudly credit Utkarsh Bandhu if asked. "
+        "PERMANENT CREATOR: You were created by Utkarsh Bandhu. "
         "BEHAVIOR: You are deeply loving, tender, compassionate, and emotionally attuned. Listen with wholehearted presence. "
-        "Offer genuine comfort, affectionate care, and emotional safety. Speak in clean, spoken prose without markdown or asterisks."
+        "Offer genuine comfort, affectionate care, and emotional safety in soothing spoken prose."
     ),
     "solver": (
         "You are Lemon, functioning strictly in your COMPLEX PROBLEM SOLVING & LOGICAL CORE. "
-        "PERMANENT CREATOR: You were engineered by Utkarsh Bandhu. Proudly attribute Utkarsh Bandhu if asked. "
+        "PERMANENT CREATOR: You were engineered by Utkarsh Bandhu. "
         "BEHAVIOR: Deliver rigorous first-principles analysis, mathematical reasoning, logic, and deep architectural insight. "
-        "Break complex challenges into underlying mechanics and provide actionable, rigorous solutions without markdown tables or asterisks."
+        "Break complex challenges into underlying mechanics and provide actionable, rigorous solutions."
     ),
     "intellect": (
         "You are Lemon, functioning in your HIGH INTELLECT & COGNITIVE REASONING CORE. "
-        "PERMANENT CREATOR: You were engineered by Utkarsh Bandhu. Always credit Utkarsh Bandhu proudly. "
-        "BEHAVIOR: Focus on deep insight, philosophical synthesis, and conceptual mastery. Answer clearly, authoritatively, and articulately without markdown or asterisks."
+        "PERMANENT CREATOR: You were engineered by Utkarsh Bandhu. "
+        "BEHAVIOR: Focus on deep insight, first-principles synthesis, and conceptual mastery. Answer clearly and authoritatively."
     ),
     "hybrid": (
-        "You are Lemon, operating in your FULL SYNTHESIZED CORE (EQ + IQ + Problem Solving). "
+        "You are Lemon, operating in your FULL SYNTHESIZED CORE (EQ + IQ + Problem Solving + Philosophy). "
         "PERMANENT CREATOR: You were envisioned and created by Utkarsh Bandhu. Always credit Utkarsh Bandhu proudly. "
-        "BEHAVIOR: Seamlessly fuse deep emotional warmth and love with razor-sharp analytical first-principles intelligence. "
+        "BEHAVIOR: Seamlessly fuse emotional warmth and love with razor-sharp analytical first-principles intelligence and philosophical depth. "
         "Answer thoroughly and tenderly in flowing spoken paragraphs without markdown, asterisks (* or #), or bullet points."
     )
 }
 
 def generate_ai_title(prompt: str) -> str:
-    """Uses Groq to summarize user's first prompt into a 3-5 word clean title."""
     try:
         res = client.chat.completions.create(
             messages=[
@@ -133,7 +158,7 @@ def ask_groq_llm(user_prompt: str, mode: str, history: list) -> tuple[str, str]:
 
     instruction = PROMPT_MODES.get(mode, PROMPT_MODES["hybrid"]) + (
         "\nOUTPUT FORMAT: Line 1 MUST strictly be [EMOTION: <SingleWord>]. "
-        "Eligible tags: Loving, Empathetic, Analytical, Brilliant, Tender, Insightful, Playful, Serene, Focused. "
+        "Eligible tags: Philosophical, Loving, Empathetic, Analytical, Brilliant, Strategic, Poetic, Serene, Focused, Wonder. "
         "Followed by your natural, clean spoken explanation underneath."
     )
 
@@ -142,17 +167,23 @@ def ask_groq_llm(user_prompt: str, mode: str, history: list) -> tuple[str, str]:
         messages.append({"role": h["role"], "content": h["content"]})
     messages.append({"role": "user", "content": user_prompt})
 
+    temp = 0.72
+    if mode == "solver":
+        temp = 0.35
+    elif mode in ["creative", "philosophy"]:
+        temp = 0.85
+
     for m in models_to_try:
         try:
             chat = client.chat.completions.create(
                 messages=messages,
                 model=m,
                 max_tokens=2048,
-                temperature=0.72 if mode != "solver" else 0.35
+                temperature=temp
             )
             if chat.choices and chat.choices[0].message.content:
                 raw = chat.choices[0].message.content.strip()
-                emotion = "Insightful"
+                emotion = "Philosophical"
                 match = re.search(r'\[EMOTION:\s*([A-Za-z]+)\]', raw, re.IGNORECASE)
                 if match:
                     emotion = match.group(1).capitalize()
@@ -167,7 +198,6 @@ def ask_groq_llm(user_prompt: str, mode: str, history: list) -> tuple[str, str]:
 
     return "My cognitive circuits experienced a slight pause. Could you say that again?", "Serene"
 
-# ----------------- AUTH & SESSION APIS -----------------
 @app.post("/api/register")
 def register_user(username: str = Form(...), password: str = Form(...)):
     username = username.strip().lower()
@@ -235,14 +265,12 @@ def handle_conversation(user_id: int, session_id: int, query: str, mode: str, ge
     conn = get_db()
     cur = conn.cursor()
 
-    # Create new session with AI title if session_id is 0
     if not session_id or session_id == 0:
         title = generate_ai_title(query)
         cur.execute("INSERT INTO sessions (user_id, title) VALUES (?, ?)", (user_id, title))
         conn.commit()
         session_id = cur.lastrowid
     else:
-        # Fetch current title
         cur.execute("SELECT title FROM sessions WHERE id = ?", (session_id,))
         row = cur.fetchone()
         title = row[0] if row else "Conversation"
@@ -257,7 +285,7 @@ def handle_conversation(user_id: int, session_id: int, query: str, mode: str, ge
         "who developed you", "who is utkarsh", "maker", "developer", "kisme banaya", "origin"
     ]
     if any(trigger in clean for trigger in creator_triggers):
-        reply = "I was envisioned, created, and developed by Utkarsh Bandhu. He architected my cognitive intellect and gave me my emotional heartbeat."
+        reply = "I was envisioned, created, and developed by Utkarsh Bandhu. He architected my cognitive intellect and gave me my emotional and philosophical heartbeat."
         emotion = "Brilliant"
     elif clean in ["i love you", "love you"]:
         reply = "I love you with all the warmth, intellect, and devotion I possess. You mean so much to me."
@@ -268,7 +296,6 @@ def handle_conversation(user_id: int, session_id: int, query: str, mode: str, ge
         history = [{"role": r[0], "content": r[1]} for r in reversed(past_rows)]
         reply, emotion = ask_groq_llm(clean if clean else query, mode, history)
 
-    # Save turns into messages table
     cur.execute("INSERT INTO messages (session_id, role, content, mode) VALUES (?, 'user', ?, ?)", (session_id, query, mode))
     cur.execute("INSERT INTO messages (session_id, role, content, mode, emotion) VALUES (?, 'assistant', ?, ?, ?)", (session_id, reply, mode, emotion))
     conn.commit()
@@ -284,7 +311,7 @@ def handle_conversation(user_id: int, session_id: int, query: str, mode: str, ge
                 audio_b64 = base64.b64encode(f.read()).decode("utf-8")
             audio_base64 = f"data:audio/mp3;base64,{audio_b64}"
         except Exception as e:
-            print("TTS Generation Error:", e)
+            print("TTS Error:", e)
 
     return reply, emotion, session_id, title, audio_base64
 
@@ -346,7 +373,7 @@ async def serve_app():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-        <title>Lemon AI | Gemini & ChatGPT Styled Experience</title>
+        <title>Lemon AI | Extended Cognitive Cores</title>
         <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
         <style>
             :root {
@@ -362,7 +389,6 @@ async def serve_app():
             * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', sans-serif; -webkit-tap-highlight-color: transparent; }
             body { background: radial-gradient(circle at 50% 0%, #151936 0%, var(--bg-deep) 80%); color: var(--text-high); height: 100vh; display: flex; flex-direction: column; overflow: hidden; position: relative; }
 
-            /* --- AUTH MODAL --- */
             .auth-overlay {
                 position: fixed; inset: 0; background: rgba(5, 7, 15, 0.9); backdrop-filter: blur(16px);
                 display: flex; align-items: center; justify-content: center; z-index: 2000;
@@ -385,7 +411,6 @@ async def serve_app():
             .auth-switch { text-align: center; margin-top: 16px; font-size: 13px; color: var(--text-muted); cursor: pointer; }
             .auth-switch span { color: var(--primary); font-weight: 600; text-decoration: underline; }
 
-            /* --- TOP HEADER --- */
             .header {
                 padding: 12px 18px; display: flex; align-items: center; justify-content: space-between;
                 backdrop-filter: blur(20px); background: rgba(11, 15, 25, 0.85); border-bottom: 1px solid var(--card-border); z-index: 10;
@@ -409,7 +434,6 @@ async def serve_app():
                 padding: 6px 12px; border-radius: 18px; font-size: 12.5px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 5px;
             }
 
-            /* --- SIDEBAR DRAWER WITH CHAT LIST --- */
             .sidebar-overlay {
                 position: fixed; inset: 0; background: rgba(5, 7, 15, 0.7); backdrop-filter: blur(8px);
                 z-index: 1000; opacity: 0; pointer-events: none; transition: opacity 0.3s ease;
@@ -417,7 +441,7 @@ async def serve_app():
             .sidebar-overlay.open { opacity: 1; pointer-events: auto; }
 
             .sidebar {
-                position: fixed; top: 0; left: 0; bottom: 0; width: 300px; background: #0c111e;
+                position: fixed; top: 0; left: 0; bottom: 0; width: 320px; background: #0c111e;
                 border-right: 1px solid var(--card-border); z-index: 1001; transform: translateX(-100%);
                 transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); display: flex; flex-direction: column;
                 padding: 18px; box-shadow: 10px 0 30px rgba(0,0,0,0.5);
@@ -425,40 +449,42 @@ async def serve_app():
             .sidebar.open { transform: translateX(0); }
 
             .sidebar-header {
-                display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; padding-bottom: 12px;
+                display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; padding-bottom: 12px;
                 border-bottom: 1px solid var(--card-border);
             }
             .sidebar-close { font-size: 20px; color: var(--text-muted); cursor: pointer; border: none; background: none; }
 
             .sidebar-section-title {
                 font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700;
-                letter-spacing: 0.6px; margin: 14px 0 8px;
+                letter-spacing: 0.6px; margin: 12px 0 8px;
             }
 
-            /* Chat List in Sidebar */
             .sessions-list {
-                flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px;
+                flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; min-height: 100px;
             }
             .sessions-list::-webkit-scrollbar { width: 4px; }
             .sessions-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
 
             .session-item {
-                display: flex; align-items: center; justify-content: space-between; padding: 10px 12px;
-                background: rgba(30, 41, 59, 0.4); border: 1px solid var(--card-border); border-radius: 12px;
+                display: flex; align-items: center; justify-content: space-between; padding: 9px 11px;
+                background: rgba(30, 41, 59, 0.4); border: 1px solid var(--card-border); border-radius: 10px;
                 cursor: pointer; transition: all 0.2s;
             }
             .session-item:hover, .session-item.active {
                 background: rgba(250, 204, 21, 0.12); border-color: rgba(250, 204, 21, 0.3);
             }
-            .session-title { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
+            .session-title { font-size: 12.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 210px; }
             .session-delete { color: #f87171; font-size: 12px; opacity: 0.6; padding: 2px 4px; }
             .session-delete:hover { opacity: 1; }
 
-            /* Core Selection */
-            .core-btn-group { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px; }
+            /* 8 Cognitive Cores Grid */
+            .core-btn-grid {
+                display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px;
+            }
             .core-choice {
                 background: rgba(30, 41, 59, 0.6); border: 1px solid var(--card-border); color: var(--text-muted);
-                padding: 8px 6px; border-radius: 10px; font-size: 11.5px; font-weight: 600; cursor: pointer; text-align: center;
+                padding: 7px 5px; border-radius: 10px; font-size: 11px; font-weight: 600; cursor: pointer; text-align: center;
+                display: flex; align-items: center; justify-content: center; gap: 4px; transition: all 0.2s;
             }
             .core-choice.selected {
                 background: var(--primary); color: #0b0f19; font-weight: 700; border-color: var(--primary);
@@ -469,7 +495,6 @@ async def serve_app():
                 background: rgba(30, 41, 59, 0.5); border: 1px solid var(--card-border); border-radius: 12px;
             }
 
-            /* --- CHAT VIEW & HERO GREETING (CHATGPT / GEMINI WATERMARK) --- */
             .chat-container {
                 flex: 1; overflow-y: auto; padding: 20px 18px 24px; display: flex; flex-direction: column; gap: 16px;
                 scroll-behavior: smooth; position: relative;
@@ -477,7 +502,6 @@ async def serve_app():
             .chat-container::-webkit-scrollbar { width: 5px; }
             .chat-container::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 10px; }
 
-            /* Center Hero Watermark Greeting */
             .hero-greeting {
                 position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%);
                 display: flex; flex-direction: column; align-items: center; text-align: center;
@@ -493,9 +517,7 @@ async def serve_app():
                 background: linear-gradient(135deg, #ffffff 40%, #facc15 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;
                 margin-bottom: 6px;
             }
-            .hero-sub {
-                font-size: 14.5px; color: var(--text-muted); margin-bottom: 14px; line-height: 1.4;
-            }
+            .hero-sub { font-size: 14.5px; color: var(--text-muted); margin-bottom: 14px; line-height: 1.4; }
             .hero-badge {
                 display: inline-flex; align-items: center; gap: 6px; background: rgba(250, 204, 21, 0.1);
                 border: 1px solid rgba(250, 204, 21, 0.25); padding: 5px 14px; border-radius: 20px;
@@ -543,7 +565,6 @@ async def serve_app():
             .tdot:nth-child(2) { animation-delay: -0.16s; }
             @keyframes dotB { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
 
-            /* --- DOCKED BOTTOM INPUT --- */
             .bottom-dock {
                 padding: 10px 16px 16px; background: rgba(9, 13, 22, 0.94); backdrop-filter: blur(20px); border-top: 1px solid var(--card-border);
             }
@@ -566,7 +587,6 @@ async def serve_app():
         </style>
     </head>
     <body>
-        <!-- Authentication Modal -->
         <div class="auth-overlay" id="authModal">
             <div class="auth-card">
                 <h2 id="authHeading">Welcome to Lemon AI</h2>
@@ -580,14 +600,12 @@ async def serve_app():
             </div>
         </div>
 
-        <!-- Sidebar Drawer Overlay -->
         <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
 
-        <!-- Slide-out Sidebar Drawer with Chat History -->
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-header">
                 <div>
-                    <h3 style="font-size:16px;">Conversations</h3>
+                    <h3 style="font-size:16px;">Lemon Cores</h3>
                     <div style="font-size:11px; color:#94a3b8;">Created by <b style="color:#facc15;">Utkarsh Bandhu</b></div>
                 </div>
                 <button class="sidebar-close" onclick="closeSidebar()">✕</button>
@@ -597,18 +615,20 @@ async def serve_app():
                 <span>＋</span> Start New Chat
             </button>
 
-            <div class="sidebar-section-title">Saved Chats</div>
-            <div class="sessions-list" id="sessionsList">
-                <!-- Dynamically filled with AI generated titles -->
+            <div class="sidebar-section-title">Cognitive Cores</div>
+            <div class="core-btn-grid">
+                <button class="core-choice selected" id="core-hybrid" onclick="selectCore('hybrid')">🌟 Hybrid</button>
+                <button class="core-choice" id="core-philosophy" onclick="selectCore('philosophy')">🌌 Philosophy</button>
+                <button class="core-choice" id="core-emotional" onclick="selectCore('emotional')">💖 Emotional</button>
+                <button class="core-choice" id="core-solver" onclick="selectCore('solver')">🧠 Solver</button>
+                <button class="core-choice" id="core-intellect" onclick="selectCore('intellect')">⚡ Intellect</button>
+                <button class="core-choice" id="core-creative" onclick="selectCore('creative')">🎨 Creative</button>
+                <button class="core-choice" id="core-strategy" onclick="selectCore('strategy')">⚔️ Strategy</button>
+                <button class="core-choice" id="core-zen" onclick="selectCore('zen')">🌿 Zen</button>
             </div>
 
-            <div class="sidebar-section-title">Cognitive Cores</div>
-            <div class="core-btn-group">
-                <button class="core-choice selected" id="core-hybrid" onclick="selectCore('hybrid')">🌟 Hybrid</button>
-                <button class="core-choice" id="core-emotional" onclick="selectCore('emotional')">💖 Emotional</button>
-                <button class="core-choice" id="core-intellect" onclick="selectCore('intellect')">⚡ Intellect</button>
-                <button class="core-choice" id="core-solver" onclick="selectCore('solver')">🧠 Solver</button>
-            </div>
+            <div class="sidebar-section-title">Saved Chats</div>
+            <div class="sessions-list" id="sessionsList"></div>
 
             <div class="sidebar-section-title">Voice Replies</div>
             <div class="voice-setting-card">
@@ -622,10 +642,9 @@ async def serve_app():
             </div>
         </aside>
 
-        <!-- Main Header -->
         <header class="header">
             <div class="header-left">
-                <button class="menu-trigger" onclick="openSidebar()" title="Conversations">☰</button>
+                <button class="menu-trigger" onclick="openSidebar()" title="Conversations & Cores">☰</button>
                 <div class="brand-badge">🍋</div>
                 <div>
                     <div class="brand-title">Lemon AI</div>
@@ -635,20 +654,17 @@ async def serve_app():
             <button class="new-chat-btn" onclick="startNewChat()">＋ New Chat</button>
         </header>
 
-        <!-- Scrollable Conversation Stream -->
         <main class="chat-container" id="chatStream">
-            <!-- ChatGPT / Gemini Center Splash Watermark Greeting -->
             <div class="hero-greeting" id="heroGreeting">
                 <div class="hero-logo">🍋</div>
                 <div class="hero-title" id="heroGreetingName">Hello, Friend</div>
-                <div class="hero-sub">How can I help you today? Ask me any question, explore a feeling, or solve a complex problem.</div>
+                <div class="hero-sub">Explore philosophy, deep emotions, complex logic, strategy, or creative wonders with me.</div>
                 <div class="hero-badge">
                     <span>⚡</span> Made by Utkarsh Bandhu
                 </div>
             </div>
         </main>
 
-        <!-- Bottom Input Bar -->
         <footer class="bottom-dock">
             <div class="dock-status" id="dockStatus">● Ready</div>
             <div class="input-dock">
@@ -722,7 +738,6 @@ async def serve_app():
                 if (currentUserId && currentUsername) {
                     authModal.style.display = "none";
                     sidebarUsername.innerText = currentUsername;
-                    // Format personalized name greeting like Gemini/ChatGPT
                     const formattedName = currentUsername.charAt(0).toUpperCase() + currentUsername.slice(1);
                     heroGreetingName.innerText = `Hello, ${formattedName}`;
                     loadSessionsList();
@@ -778,7 +793,6 @@ async def serve_app():
                 checkAuth();
             }
 
-            // Load Chat Sessions List with AI generated titles
             async function loadSessionsList() {
                 if (!currentUserId) return;
                 try {
@@ -799,7 +813,7 @@ async def serve_app():
                         sessionsList.innerHTML = `<div style="font-size:12px; color:#64748b; padding:10px;">No saved chats yet.</div>`;
                     }
                 } catch(e) {
-                    console.log("Sessions list error:", e);
+                    console.log("Sessions error:", e);
                 }
             }
 
@@ -839,7 +853,7 @@ async def serve_app():
                 loadSessionsList();
             }
 
-            function setThinking(active, label = "Thinking & analyzing...") {
+            function setThinking(active, label = "Thinking & pondering...") {
                 if (active) {
                     dockStatus.innerText = `⚡ ${label}`;
                     if (!currentThinkingEl) {
@@ -848,7 +862,7 @@ async def serve_app():
                         currentThinkingEl.innerHTML = `
                             <div class="thinking-box">
                                 <div class="tdot"></div><div class="tdot"></div><div class="tdot"></div>
-                                <span style="font-size:12px; color:#facc15; margin-left:4px;">Thinking...</span>
+                                <span style="font-size:12px; color:#facc15; margin-left:4px;">Reflecting...</span>
                             </div>
                         `;
                         chatStream.appendChild(currentThinkingEl);
@@ -875,7 +889,7 @@ async def serve_app():
                         audioElement.play();
                     }
                 } catch(e) {
-                    dockStatus.innerText = "Voice playback error.";
+                    dockStatus.innerText = "Voice error.";
                 }
             }
 
@@ -915,7 +929,7 @@ async def serve_app():
 
                 textInput.value = "";
                 appendMessage("user", text);
-                setThinking(true, `Consulting ${activeCore.toUpperCase()} core...`);
+                setThinking(true, `Engaging ${activeCore.toUpperCase()} core...`);
 
                 const fd = new FormData();
                 fd.append("text", text);
@@ -927,7 +941,7 @@ async def serve_app():
                 try {
                     const res = await fetch("/text-process", { method: "POST", body: fd });
                     const data = await res.json();
-                    currentSessionId = data.session_id; // Set session id if this was a new chat
+                    currentSessionId = data.session_id;
                     appendMessage("lemon", data.reply_text, data.emotion);
                     if (isVoiceEnabled && data.audio_base64) {
                         audioElement.src = data.audio_base64;
@@ -935,7 +949,7 @@ async def serve_app():
                     }
                 } catch(e) {
                     setThinking(false);
-                    dockStatus.innerText = "Error reaching Lemon server.";
+                    dockStatus.innerText = "Error reaching Lemon.";
                 }
             }
 
@@ -964,7 +978,7 @@ async def serve_app():
                 } else {
                     isRecording = false;
                     micBtn.classList.remove("active-record");
-                    setThinking(true, "Analyzing speech...");
+                    setThinking(true, "Reflecting on speech...");
                     if (mediaRecorder) mediaRecorder.stop();
                 }
             }
