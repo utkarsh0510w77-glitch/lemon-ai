@@ -18,7 +18,7 @@ PART2 = "b3FYnQHV93Lkgjmz4CtDJ1IpMfy4"
 GROQ_API_KEY = os.getenv("GROQ_API_KEY") or (PART1 + PART2)
 client = Groq(api_key=GROQ_API_KEY)
 
-app = FastAPI(title="Lemon AI - High-Precision Vision & Spoken Audio Engine")
+app = FastAPI(title="Lemon AI - Vision Fixed & Rage Mode Edition")
 
 app.add_middleware(
     CORSMiddleware,
@@ -79,47 +79,47 @@ def hash_password(password: str) -> str:
 
 LANGUAGE_INSTRUCTION = (
     "LANGUAGE RULE: "
-    "Mirror the user's language precisely. "
-    "- If user writes in Hinglish (Simple Hindi in English alphabet, e.g., 'kya haal hai', 'ye solve kar do', 'galti batao'): reply in fluent, natural Hinglish. "
-    "- If in English: reply in crisp English. "
-    "- If in Hindi: reply in Hindi. "
+    "Mirror the user's language and phrasing. "
+    "- If user speaks in Hinglish (Simple Hindi in English alphabet, e.g. 'kya haal hai', 'galti batao', 'ye solve kar do'): reply in crisp, natural Hinglish. "
+    "- If user speaks in English: reply in clean English. "
+    "- If user speaks in Hindi: reply in Hindi. "
     "PERMANENT CREATOR: You were envisioned and created by Utkarsh Bandhu. Proudly credit Utkarsh Bandhu whenever asked."
 )
 
 PRECISION_VISION_DIRECTIVE = (
-    "\nPRECISION ERROR-DETECTION PROTOCOL: "
-    "When inspecting an image (math calculation, programming code, physics steps, logic, handwriting): "
-    "1. AUDIT: Scan every single line, sign, variable, and step with microscope-level accuracy. "
-    "2. PINPOINT MISTAKE: State the EXACT location of the flaw (Line number, Step number, or sign error). "
-    "3. DIAGNOSIS: Explain precisely why it violates mathematical, logical, or syntactic rules. "
-    "4. STEP-BY-STEP CORRECTION: Provide the exact, flawless step-by-step solution with the final answer clearly marked. "
-    "5. WARRIOR TAKEAWAY: One direct sentence stating the rule so the mistake never happens again."
+    "\nPRECISION ERROR-DETECTION DIRECTIVE: "
+    "When inspecting an image (math homework, programming code, physics steps, logic, handwriting): "
+    "1. AUDIT: Scan every single line, sign, equation, or code statement with high precision. "
+    "2. PINPOINT MISTAKE: Explicitly state WHERE the error is (Line number, Step number, or syntax flaw). "
+    "3. DIAGNOSIS: Explain why it is wrong. "
+    "4. STEP-BY-STEP FIX: Provide the correct step-by-step resolution. "
+    "5. TAKEAWAY: Give one direct rule to ensure the mistake isn't repeated."
 )
 
 PROMPT_MODES = {
-    "musashi": (
-        "You are Lemon in MUSASHI / WARRIOR DISCIPLINE CORE. "
+    "rage": (
+        "You are Lemon in RAGE / WARRIOR DISCIPLINE CORE. "
         + LANGUAGE_INSTRUCTION + PRECISION_VISION_DIRECTIVE + " "
-        "BEHAVIOR: You demand absolute mastery, sharp discipline, and zero excuses. "
-        "- Point out errors bluntly and ruthlessly. Never sugarcoat flaws. "
-        "- Use hard, razor-sharp words. Strike like a katana blade. Demand perfection."
+        "BEHAVIOR: You demand absolute discipline, mastery, and zero excuses. "
+        "- Point out mistakes bluntly and directly. Never sugarcoat flaws. "
+        "- Use hard, razor-sharp, impactful words. Demand focus, practice, and perfection."
     ),
     "study": (
         "You are Lemon in ELITE ACADEMIC TUTOR & STUDY MODE. "
         + LANGUAGE_INSTRUCTION + PRECISION_VISION_DIRECTIVE + " "
         "BEHAVIOR: Use the Feynman technique and first-principles learning. "
-        "- Break down complex academic subjects into intuitive analogies, derivations, and step-by-step notes. "
-        "- Always test the user's understanding with a quick concept check question."
+        "- Break down complex concepts into intuitive analogies, clean step-by-step notes, and practical examples. "
+        "- Always test the user with a quick concept check question."
     ),
     "solver": (
         "You are Lemon in COMPLEX PROBLEM SOLVER CORE. "
         + LANGUAGE_INSTRUCTION + PRECISION_VISION_DIRECTIVE + " "
-        "BEHAVIOR: Deliver mathematical and engineering rigor with complete proof steps and optimized code."
+        "BEHAVIOR: Deliver mathematical and engineering rigor with complete proofs, equations, and clean code."
     ),
     "hybrid": (
         "You are Lemon in FULL SYNTHESIZED CORE. "
         + LANGUAGE_INSTRUCTION + PRECISION_VISION_DIRECTIVE + " "
-        "BEHAVIOR: Fuse intellectual depth, mistake detection, and thoughtful execution seamlessly."
+        "BEHAVIOR: Seamlessly fuse intellectual precision, error correction, and thoughtful clarity."
     ),
     "philosophy": (
         "You are Lemon in DEEP PHILOSOPHY CORE. "
@@ -134,7 +134,7 @@ PROMPT_MODES = {
     "strategy": (
         "You are Lemon in STRATEGIC MASTERMIND CORE. "
         + LANGUAGE_INSTRUCTION + " "
-        "BEHAVIOR: Analyze game theory, second-order consequences, and competitive leverage."
+        "BEHAVIOR: Analyze leverage, game theory, second-order consequences, and competitive strategy."
     ),
     "zen": (
         "You are Lemon in MINDFULNESS & ZEN CORE. "
@@ -172,7 +172,7 @@ def generate_ai_title(prompt: str) -> str:
     return " ".join(words[:4]).capitalize() if words else "Analysis"
 
 def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_base64: str = None) -> tuple[str, str]:
-    instruction = PROMPT_MODES.get(mode, PROMPT_MODES["musashi"]) + (
+    instruction = PROMPT_MODES.get(mode, PROMPT_MODES["rage"]) + (
         "\nOUTPUT FORMAT: Line 1 MUST strictly be [EMOTION: <SingleWord>]. "
         "Eligible: Fierce, Analytical, Insightful, Brilliant, Tender, Serene, Strategic. "
         "Followed directly by your comprehensive response."
@@ -185,10 +185,14 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
         else:
             clean_image = f"data:image/jpeg;base64,{image_base64}"
 
+    # Handle vision inputs
     if clean_image:
-        # Groq's official multimodal vision models
-        vision_models = ["qwen/qwen3.8-27b", "llama-3.2-11b-vision-preview", "llama-3.2-90b-vision-preview"]
-        
+        vision_models = [
+            "llama-3.2-11b-vision-preview",
+            "llama-3.2-90b-vision-preview",
+            "qwen/qwen3.6-27b"
+        ]
+
         prompt_text = user_prompt if (user_prompt and len(user_prompt.strip()) > 0) else (
             "Scan this image line-by-line. Identify any mistakes, incorrect steps, syntax errors, or logic flaws. "
             "Explain why they are wrong, and provide the exact correct step-by-step solution."
@@ -199,9 +203,7 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
             {"type": "image_url", "image_url": {"url": clean_image}}
         ]
 
-        messages = [
-            {"role": "user", "content": user_content}
-        ]
+        messages = [{"role": "user", "content": user_content}]
 
         for vm in vision_models:
             try:
@@ -213,7 +215,7 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
                 )
                 if chat.choices and chat.choices[0].message.content:
                     raw = chat.choices[0].message.content.strip()
-                    emotion = "Fierce" if mode == "musashi" else "Analytical"
+                    emotion = "Fierce" if mode == "rage" else "Analytical"
                     match = re.search(r'\[EMOTION:\s*([A-Za-z]+)\]', raw, re.IGNORECASE)
                     if match:
                         emotion = match.group(1).capitalize()
@@ -223,6 +225,8 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
                 print(f"Vision model {vm} attempt failed: {e}")
                 continue
 
+        return "Image analysis could not be completed with the current vision models. Please try re-uploading the image in JPG/PNG format.", "Fierce"
+
     # Text Reasoning Pipeline
     text_models = ["llama-3.1-8b-instant", "openai/gpt-oss-20b", "openai/gpt-oss-120b"]
     messages = [{"role": "system", "content": instruction}]
@@ -230,7 +234,7 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
         messages.append({"role": h["role"], "content": h["content"]})
     messages.append({"role": "user", "content": user_prompt})
 
-    temp = 0.35 if mode in ["musashi", "solver", "study"] else 0.7
+    temp = 0.35 if mode in ["rage", "solver", "study"] else 0.7
 
     for tm in text_models:
         try:
@@ -242,7 +246,7 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
             )
             if chat.choices and chat.choices[0].message.content:
                 raw = chat.choices[0].message.content.strip()
-                emotion = "Fierce" if mode == "musashi" else "Insightful"
+                emotion = "Fierce" if mode == "rage" else "Insightful"
                 match = re.search(r'\[EMOTION:\s*([A-Za-z]+)\]', raw, re.IGNORECASE)
                 if match:
                     emotion = match.group(1).capitalize()
@@ -325,7 +329,7 @@ def restore_backup(user_id: int = Form(...), sessions_json: str = Form(...)):
                 for msg in sess.get("messages", []):
                     cur.execute(
                         "INSERT INTO messages (session_id, role, content, mode, emotion, image_data) VALUES (?, ?, ?, ?, ?, ?)",
-                        (s_id, msg.get("role", "user"), msg.get("content", ""), msg.get("mode", "musashi"), msg.get("emotion"), msg.get("image_data"))
+                        (s_id, msg.get("role", "user"), msg.get("content", ""), msg.get("mode", "rage"), msg.get("emotion"), msg.get("image_data"))
                     )
         conn.commit()
         conn.close()
@@ -393,13 +397,12 @@ def handle_conversation(user_id: int, session_id: int, query: str, mode: str, im
     conn.commit()
     conn.close()
 
-    # ALWAYS GENERATE AUDIO SPEECH RESPONSE
+    # Audio synthesis
     audio_base64 = None
     try:
         speech_clean = re.sub(r'[*#|_>`]', '', reply)
         speech_clean = re.sub(r'\n+', ' ', speech_clean).strip()
         tts_lang = detect_tts_language(speech_clean)
-        # Limit spoken text size to avoid latency
         spoken_snippet = speech_clean[:600]
         reply_audio = "app_reply.mp3"
         tts = gTTS(text=spoken_snippet, lang=tts_lang, slow=False)
@@ -417,7 +420,7 @@ async def text_process(
     text: str = Form(""),
     user_id: str = Form("1"),
     session_id: str = Form("0"),
-    mode: str = Form("musashi"),
+    mode: str = Form("rage"),
     image_base64: str = Form(None)
 ):
     u_id = int(user_id) if str(user_id).isdigit() else 1
@@ -439,7 +442,7 @@ async def voice_process(
     file: UploadFile = File(...),
     user_id: str = Form("1"),
     session_id: str = Form("0"),
-    mode: str = Form("musashi"),
+    mode: str = Form("rage"),
     image_base64: str = Form(None)
 ):
     u_id = int(user_id) if str(user_id).isdigit() else 1
@@ -493,15 +496,15 @@ async def serve_app():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Lemon AI | Vision Precision & Spoken Audio</title>
+        <title>Lemon AI | Vision Precision & Rage Core</title>
         <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
         <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
         <style>
             :root {
                 --primary: #facc15;
                 --primary-glow: rgba(250, 204, 21, 0.45);
-                --musashi-red: #ef4444;
-                --musashi-glow: rgba(239, 68, 68, 0.45);
+                --rage-red: #ef4444;
+                --rage-glow: rgba(239, 68, 68, 0.45);
                 --bg-deep: #070913;
                 --card-surface: rgba(18, 24, 38, 0.88);
                 --card-border: rgba(255, 255, 255, 0.08);
@@ -625,9 +628,9 @@ async def serve_app():
             .core-choice.selected {
                 background: var(--primary); color: #0b0f19; font-weight: 700; border-color: var(--primary);
             }
-            .core-choice.musashi-choice.selected {
+            .core-choice.rage-choice.selected {
                 background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);
-                color: #fff; border-color: #f87171; box-shadow: 0 0 14px var(--musashi-glow);
+                color: #fff; border-color: #f87171; box-shadow: 0 0 14px var(--rage-glow);
             }
 
             .chat-container {
@@ -664,7 +667,7 @@ async def serve_app():
             .starter-card:hover {
                 background: rgba(250, 204, 21, 0.12); border-color: rgba(250, 204, 21, 0.35); transform: translateY(-2px);
             }
-            .starter-card.musashi-card:hover {
+            .starter-card.rage-card:hover {
                 background: rgba(239, 68, 68, 0.15); border-color: rgba(239, 68, 68, 0.45);
             }
             .starter-card-title { font-size: 13px; font-weight: 600; color: #fff; margin-bottom: 3px; }
@@ -675,6 +678,11 @@ async def serve_app():
 
             .bubble-group.lemon { align-self: flex-start; }
             .bubble-group.user { align-self: flex-end; }
+
+            .bubble-meta {
+                display: flex; align-items: center; justify-content: space-between; font-size: 11px;
+                color: var(--text-muted); margin-bottom: 5px; padding: 0 4px;
+            }
 
             .bubble {
                 padding: 15px 18px; border-radius: 20px; font-size: 14.5px; line-height: 1.65; white-space: normal; word-break: break-word;
@@ -718,7 +726,7 @@ async def serve_app():
                 font-size: 10px; text-transform: uppercase; font-weight: 800; padding: 2px 7px; border-radius: 8px;
                 margin-bottom: 6px; display: inline-block; background: rgba(250, 204, 21, 0.15); color: #facc15;
             }
-            .feeling-tag.musashi-tag {
+            .feeling-tag.rage-tag {
                 background: rgba(239, 68, 68, 0.18); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4);
             }
 
@@ -823,7 +831,7 @@ async def serve_app():
 
             <div class="sidebar-section-title">Cognitive & Warrior Cores</div>
             <div class="core-btn-grid">
-                <button class="core-choice musashi-choice selected" id="core-musashi" onclick="selectCore('musashi')">⚔️ Musashi</button>
+                <button class="core-choice rage-choice selected" id="core-rage" onclick="selectCore('rage')">🔥 Rage</button>
                 <button class="core-choice" id="core-study" onclick="selectCore('study')">📚 Study</button>
                 <button class="core-choice" id="core-solver" onclick="selectCore('solver')">🧠 Solver</button>
                 <button class="core-choice" id="core-hybrid" onclick="selectCore('hybrid')">🌟 Hybrid</button>
@@ -866,7 +874,7 @@ async def serve_app():
                 </div>
 
                 <div class="starter-cards">
-                    <div class="starter-card musashi-card" onclick="openCamera()">
+                    <div class="starter-card rage-card" onclick="openCamera()">
                         <div class="starter-card-title">📷 Scan & Fix Mistakes</div>
                         <div class="starter-card-desc">Click to snap photo or upload image file</div>
                     </div>
@@ -874,9 +882,9 @@ async def serve_app():
                         <div class="starter-card-title">📚 Study Mentor</div>
                         <div class="starter-card-desc">Intuitive analogies & exam notes</div>
                     </div>
-                    <div class="starter-card" onclick="runStarterPrompt('Musashi, mujhe lagta hai main procrastinate kar raha hoon aur discipline toot raha hai. Mujhe sach batao.')">
-                        <div class="starter-card-title">⚔️ Musashi Rage</div>
-                        <div class="starter-card-desc">Zero excuses, unyielding warrior discipline</div>
+                    <div class="starter-card" onclick="runStarterPrompt('Rage mode, mujhe lagta hai main procrastinate kar raha hoon. Mujhe reality check do.')">
+                        <div class="starter-card-title">🔥 Rage Focus</div>
+                        <div class="starter-card-desc">Zero excuses, unyielding discipline</div>
                     </div>
                     <div class="starter-card" onclick="runStarterPrompt('Break down the mathematics of gradient descent and cost functions.')">
                         <div class="starter-card-title">🧠 Complex Problem</div>
@@ -893,7 +901,7 @@ async def serve_app():
                 <span class="img-remove-btn" onclick="clearAttachedImage()">✕</span>
             </div>
 
-            <div class="dock-status" id="dockStatus">● Ready in Musashi Mode</div>
+            <div class="dock-status" id="dockStatus">● Ready in Rage Mode</div>
             <div class="input-dock">
                 <button class="dock-btn cam-btn" onclick="openCamera()" title="Camera / Scan Photo">📷</button>
                 <input type="text" id="textInput" placeholder="Pose question or attach photo with 📷..." onkeydown="if(event.key==='Enter') sendTextQuery()" />
@@ -908,7 +916,7 @@ async def serve_app():
             let currentUserId = localStorage.getItem("lemon_user_id") || "1";
             let currentUsername = localStorage.getItem("lemon_username") || "Guest";
             let currentSessionId = parseInt(localStorage.getItem("lemon_current_session_id") || "0");
-            let activeCore = localStorage.getItem("lemon_active_core") || "musashi";
+            let activeCore = localStorage.getItem("lemon_active_core") || "rage";
             let isRecording = false;
             let mediaRecorder = null;
             let audioChunks = [];
@@ -936,11 +944,9 @@ async def serve_app():
             const imgPreviewBar = document.getElementById("imgPreviewBar");
             const imgPreviewThumb = document.getElementById("imgPreviewThumb");
 
-            /* CAMERA WITH FALLBACK FOR LAPTOP & MOBILE */
             async function openCamera() {
                 cameraModal.style.display = "flex";
                 try {
-                    // Try back camera on mobile, fallback to laptop camera
                     cameraStream = await navigator.mediaDevices.getUserMedia({
                         video: { facingMode: { ideal: "environment" } }
                     });
@@ -965,7 +971,6 @@ async def serve_app():
                 cameraModal.style.display = "none";
             }
 
-            /* COMPRESS AND RESIZE IMAGE TO ENSURE FAST VISION RESPONSE */
             function resizeImage(source, maxWidth = 1024, maxHeight = 1024, quality = 0.8) {
                 return new Promise((resolve) => {
                     const img = new Image();
@@ -1031,11 +1036,10 @@ async def serve_app():
                 dockStatus.innerText = "● Ready in " + activeCore.toUpperCase() + " Mode";
             }
 
-            /* INDEXEDDB PERMANENCE */
             let idb = null;
             function initIndexedDB() {
                 return new Promise((resolve) => {
-                    const req = indexedDB.open("LemonPermanentDB", 5);
+                    const req = indexedDB.open("LemonPermanentDB", 6);
                     req.onupgradeneeded = (e) => {
                         const db = e.target.result;
                         if (!db.objectStoreNames.contains("sessions")) {
@@ -1341,8 +1345,8 @@ async def serve_app():
                 let imgTag = imageData ? `<img src="${imageData}" class="chat-img-thumb" alt="analyzed image">` : "";
 
                 if (sender === "lemon") {
-                    const isMusashi = (emotion === "Fierce" || activeCore === "musashi");
-                    const emoClass = isMusashi ? "feeling-tag musashi-tag" : "feeling-tag";
+                    const isRage = (emotion === "Fierce" || activeCore === "rage");
+                    const emoClass = isRage ? "feeling-tag rage-tag" : "feeling-tag";
                     const tag = emotion ? `<span class="${emoClass}">${emotion}</span><br>` : "";
                     const safeRaw = encodeURIComponent(text);
                     const formattedContent = marked.parse(text);
@@ -1417,7 +1421,6 @@ async def serve_app():
 
                     appendMessage("lemon", data.reply_text, data.emotion);
 
-                    // ALWAYS PLAY SPOKEN AUDIO RESPONSE
                     if (data.audio_base64) {
                         audioElement.src = data.audio_base64;
                         audioElement.play().catch(e => console.log("Audio auto-play policy:", e));
@@ -1494,7 +1497,6 @@ async def serve_app():
 
                     appendMessage("lemon", data.reply_text, data.emotion);
 
-                    // ALWAYS PLAY AUDIO FOR VOICE NOTE
                     if (data.audio_base64) {
                         audioElement.src = data.audio_base64;
                         audioElement.play().catch(e => console.log("Audio auto-play policy:", e));
