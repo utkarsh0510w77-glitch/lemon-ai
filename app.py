@@ -5,12 +5,18 @@ import sqlite3
 import hashlib
 import base64
 import datetime
-import time
-from fastapi import FastAPI, File, Form, UploadFile, Request
+import io
+from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from groq import Groq
 from gtts import gTTS
+
+try:
+    from pypdf import PdfReader
+    PYPDF_AVAILABLE = True
+except ImportError:
+    PYPDF_AVAILABLE = False
 
 try:
     import psycopg2
@@ -28,13 +34,12 @@ client = Groq(api_key=GROQ_API_KEY)
 
 OWNER_USERNAME = "utkarsh"
 
-# Render Persistent Cloud PostgreSQL Database URL
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql://lemon_db_7jr5_user:fCnr4Ag4rcayvFbgZcxeRW02ROKFnm8A@dpg-db4e0i3l550s73besfpg-a.oregon-postgres.render.com/lemon_db_7jr5"
 )
 
-app = FastAPI(title="Lemon AI - Persistent Cloud Database Edition")
+app = FastAPI(title="Lemon AI - Sovereign Edition")
 
 app.add_middleware(
     CORSMiddleware,
@@ -44,22 +49,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ----------------- DUAL DATABASE ENGINE (POSTGRESQL + SQLITE FALLBACK) -----------------
 class DBManager:
     @staticmethod
     def get_conn():
         if POSTGRES_AVAILABLE and DATABASE_URL:
             try:
-                # Render external/internal Postgres URL handling
                 url = DATABASE_URL
                 if url.startswith("postgres://"):
                     url = url.replace("postgres://", "postgresql://", 1)
                 conn = psycopg2.connect(url, sslmode="require")
                 return conn, "postgres"
             except Exception as e:
-                print(f"[DB] PostgreSQL connection failed, falling back to SQLite: {e}")
-        
-        # SQLite Fallback
+                print(f"[DB] PostgreSQL connection failed: {e}")
         conn = sqlite3.connect("lemon_data.db", timeout=25)
         conn.execute("PRAGMA journal_mode=WAL;")
         return conn, "sqlite"
@@ -78,19 +79,17 @@ def init_db():
                     last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
-            """)
-            cur.execute("""
                 CREATE TABLE IF NOT EXISTS site_stats (
                     key VARCHAR(100) PRIMARY KEY,
                     value BIGINT DEFAULT 0
                 );
-            """)
-            cur.execute("""
-                INSERT INTO site_stats (key, value) 
-                VALUES ('total_visits', 0) 
-                ON CONFLICT (key) DO NOTHING;
-            """)
-            cur.execute("""
+                INSERT INTO site_stats (key, value) VALUES ('total_visits', 0) ON CONFLICT (key) DO NOTHING;
+                CREATE TABLE IF NOT EXISTS announcements (
+                    id SERIAL PRIMARY KEY,
+                    message TEXT NOT NULL,
+                    is_active BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
                 CREATE TABLE IF NOT EXISTS sessions (
                     id SERIAL PRIMARY KEY,
                     user_id INT NOT NULL,
@@ -99,8 +98,6 @@ def init_db():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
                 );
-            """)
-            cur.execute("""
                 CREATE TABLE IF NOT EXISTS messages (
                     id SERIAL PRIMARY KEY,
                     session_id INT NOT NULL,
@@ -112,8 +109,6 @@ def init_db():
                     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
                 );
-            """)
-            cur.execute("""
                 CREATE TABLE IF NOT EXISTS complaints (
                     id SERIAL PRIMARY KEY,
                     user_id INT NOT NULL,
@@ -121,11 +116,11 @@ def init_db():
                     category VARCHAR(100) NOT NULL,
                     message TEXT NOT NULL,
                     image_proof TEXT,
+                    status VARCHAR(50) DEFAULT 'Open',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
             """)
         else:
-            # SQLite Tables
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -134,15 +129,18 @@ def init_db():
                     role TEXT NOT NULL DEFAULT 'user',
                     last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
+                );
             """)
+            cur.execute("CREATE TABLE IF NOT EXISTS site_stats (key TEXT PRIMARY KEY, value INTEGER DEFAULT 0);")
+            cur.execute("INSERT OR IGNORE INTO site_stats (key, value) VALUES ('total_visits', 0);")
             cur.execute("""
-                CREATE TABLE IF NOT EXISTS site_stats (
-                    key TEXT PRIMARY KEY,
-                    value INTEGER DEFAULT 0
-                )
+                CREATE TABLE IF NOT EXISTS announcements (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    message TEXT NOT NULL,
+                    is_active INTEGER DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
             """)
-            cur.execute("INSERT OR IGNORE INTO site_stats (key, value) VALUES ('total_visits', 0)")
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS sessions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -150,7 +148,7 @@ def init_db():
                     title TEXT NOT NULL,
                     core_mode TEXT NOT NULL DEFAULT 'intellect',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
+                );
             """)
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS messages (
@@ -162,7 +160,7 @@ def init_db():
                     emotion TEXT,
                     image_data TEXT,
                     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
+                );
             """)
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS complaints (
@@ -172,8 +170,9 @@ def init_db():
                     category TEXT NOT NULL,
                     message TEXT NOT NULL,
                     image_proof TEXT,
+                    status TEXT DEFAULT 'Open',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
+                );
             """)
         conn.commit()
     finally:
@@ -191,8 +190,8 @@ def record_visit():
     try:
         cur.execute("UPDATE site_stats SET value = value + 1 WHERE key = 'total_visits'")
         conn.commit()
-    except Exception as e:
-        print("Visit record error:", e)
+    except Exception:
+        pass
     finally:
         conn.close()
 
@@ -202,14 +201,14 @@ def update_user_heartbeat(user_id: int):
     conn, engine = DBManager.get_conn()
     cur = conn.cursor()
     try:
-        cur.execute("UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE id = %s" if engine == "postgres" else "UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE id = ?", (user_id,))
+        sql = "UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE id = %s" if engine == "postgres" else "UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE id = ?"
+        cur.execute(sql, (user_id,))
         conn.commit()
-    except Exception as e:
-        print("Heartbeat error:", e)
+    except Exception:
+        pass
     finally:
         conn.close()
 
-# ----------------- COGNITIVE PROMPTS -----------------
 INTELLECTUAL_BASE_RULE = (
     "COGNITIVE STANDARD & METAPROMPT: "
     "You are Lemon—an ultra-intellectual synthetic mind engineered by Utkarsh Bandhu. "
@@ -219,8 +218,8 @@ INTELLECTUAL_BASE_RULE = (
 )
 
 VISION_ERROR_ANALYSIS_RULE = (
-    "\nEXHAUSTIVE VISION DIAGNOSIS: "
-    "When an image is supplied: "
+    "\nEXHAUSTIVE VISION & DOCUMENT DIAGNOSIS: "
+    "When an image or document snippet is supplied: "
     "1. Micro-audit every line, syntax token, variable assignment, and arithmetic sign. "
     "2. Locate the exact deviation from truth (Line/Step number). "
     "3. Explain the mechanical/logical reason for failure. "
@@ -271,7 +270,7 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
 
     if clean_image:
         vision_models = ["qwen/qwen3.8-27b", "meta-llama/llama-4-scout-17b-16e-instruct"]
-        prompt_text = user_prompt if (user_prompt and len(user_prompt.strip()) > 0) else "Audit this image line-by-line and correct any flaws."
+        prompt_text = user_prompt if (user_prompt and len(user_prompt.strip()) > 0) else "Audit this artifact line-by-line and correct any flaws."
         user_content = [
             {"type": "text", "text": f"{instruction}\n\nUser Inquiry & Image:\n{prompt_text}"},
             {"type": "image_url", "image_url": {"url": clean_image}}
@@ -328,7 +327,6 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
             continue
     return "Cognitive process briefly desynchronized. Articulate your query again.", "Serene"
 
-# ----------------- AUTH APIS (POSTGRES COMPATIBLE) -----------------
 @app.post("/api/register")
 def register_user(username: str = Form(...), password: str = Form(...)):
     username = username.strip().lower()
@@ -340,20 +338,12 @@ def register_user(username: str = Form(...), password: str = Form(...)):
     try:
         pwd_hash = hash_password(password)
         user_role = "owner" if username == OWNER_USERNAME.lower() else "user"
-        
         if engine == "postgres":
-            cur.execute(
-                "INSERT INTO users (username, password_hash, role) VALUES (%s, %s, %s) RETURNING id",
-                (username, pwd_hash, user_role)
-            )
+            cur.execute("INSERT INTO users (username, password_hash, role) VALUES (%s, %s, %s) RETURNING id", (username, pwd_hash, user_role))
             user_id = cur.fetchone()[0]
         else:
-            cur.execute(
-                "INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
-                (username, pwd_hash, user_role)
-            )
+            cur.execute("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)", (username, pwd_hash, user_role))
             user_id = cur.lastrowid
-
         conn.commit()
         return JSONResponse({"status": "ok", "user_id": user_id, "username": username, "role": user_role})
     except Exception as e:
@@ -393,6 +383,18 @@ def login_user(username: str = Form(...), password: str = Form(...)):
 def heartbeat(user_id: int = Form(...)):
     update_user_heartbeat(user_id)
     return JSONResponse({"status": "ok"})
+
+@app.get("/api/announcement")
+def get_announcement():
+    conn, engine = DBManager.get_conn()
+    cur = conn.cursor()
+    try:
+        sql = "SELECT message FROM announcements WHERE is_active = TRUE ORDER BY id DESC LIMIT 1" if engine == "postgres" else "SELECT message FROM announcements WHERE is_active = 1 ORDER BY id DESC LIMIT 1"
+        cur.execute(sql)
+        row = cur.fetchone()
+        return JSONResponse({"message": row[0] if row else ""})
+    finally:
+        conn.close()
 
 @app.get("/api/sessions/{user_id}")
 def get_user_sessions(user_id: int):
@@ -474,46 +476,60 @@ def submit_complaint(
     finally:
         conn.close()
 
-# ----------------- RELIABLE OWNER TELEMETRY API -----------------
+# ----------------- PARSE DOCUMENT / PDF API -----------------
+@app.post("/api/parse-doc")
+async def parse_doc(file: UploadFile = File(...)):
+    filename = file.filename.lower()
+    content_bytes = await file.read()
+    extracted_text = ""
+
+    if filename.endswith(".pdf") and PYPDF_AVAILABLE:
+        try:
+            reader = PdfReader(io.BytesIO(content_bytes))
+            for page in reader.pages[:10]:
+                text = page.extract_text()
+                if text:
+                    extracted_text += text + "\n"
+        except Exception as e:
+            return JSONResponse({"status": "error", "message": f"PDF parse fault: {e}"}, status_code=400)
+    else:
+        try:
+            extracted_text = content_bytes.decode("utf-8", errors="ignore")
+        except Exception as e:
+            return JSONResponse({"status": "error", "message": f"File read error: {e}"}, status_code=400)
+
+    extracted_text = extracted_text.strip()[:6000]
+    if not extracted_text:
+        return JSONResponse({"status": "error", "message": "Could not extract readable text from artifact."}, status_code=400)
+
+    return JSONResponse({"status": "ok", "filename": file.filename, "text": extracted_text})
+
+# ----------------- OWNER ADMIN APIS -----------------
 @app.get("/api/owner/telemetry")
 def get_owner_telemetry(user_id: int = 0, username: str = ""):
     conn, engine = DBManager.get_conn()
     cur = conn.cursor()
     try:
         is_owner = False
-
         if user_id and user_id > 0:
             sql = "SELECT id, username, role FROM users WHERE id = %s" if engine == "postgres" else "SELECT id, username, role FROM users WHERE id = ?"
             cur.execute(sql, (user_id,))
             row = cur.fetchone()
-            if row:
-                if row[1].lower() == OWNER_USERNAME.lower() or row[2] == "owner":
-                    is_owner = True
-                    if row[2] != "owner":
-                        up_sql = "UPDATE users SET role = 'owner' WHERE id = %s" if engine == "postgres" else "UPDATE users SET role = 'owner' WHERE id = ?"
-                        cur.execute(up_sql, (row[0],))
-                        conn.commit()
-
-        if not is_owner and username:
-            if username.strip().lower() == OWNER_USERNAME.lower():
-                sql = "SELECT id FROM users WHERE lower(username) = %s" if engine == "postgres" else "SELECT id FROM users WHERE lower(username) = ?"
-                cur.execute(sql, (OWNER_USERNAME.lower(),))
-                u_row = cur.fetchone()
-                if u_row:
-                    up_sql = "UPDATE users SET role = 'owner' WHERE id = %s" if engine == "postgres" else "UPDATE users SET role = 'owner' WHERE id = ?"
-                    cur.execute(up_sql, (u_row[0],))
-                    conn.commit()
+            if row and (row[1].lower() == OWNER_USERNAME.lower() or row[2] == "owner"):
                 is_owner = True
 
+        if not is_owner and username and username.strip().lower() == OWNER_USERNAME.lower():
+            is_owner = True
+
         if not is_owner:
-            return JSONResponse({"status": "error", "message": "Unauthorized access to Sovereign Telemetry."}, status_code=403)
+            return JSONResponse({"status": "error", "message": "Unauthorized."}, status_code=403)
 
         cur.execute("SELECT value FROM site_stats WHERE key = 'total_visits'")
         v_row = cur.fetchone()
         total_visits = v_row[0] if v_row else 0
 
         cur.execute("SELECT id, username, role, last_active, created_at FROM users ORDER BY id DESC")
-        users_raw = cur.fetchall()
+        users_list = [{"id": u[0], "username": u[1], "role": u[2], "last_active": str(u[3]), "created_at": str(u[4])} for u in cur.fetchall()]
 
         if engine == "postgres":
             cur.execute("SELECT COUNT(*) FROM users WHERE last_active >= NOW() - INTERVAL '10 minutes'")
@@ -521,28 +537,8 @@ def get_owner_telemetry(user_id: int = 0, username: str = ""):
             cur.execute("SELECT COUNT(*) FROM users WHERE datetime(last_active) >= datetime('now', '-10 minutes')")
         online_count = cur.fetchone()[0]
 
-        users_list = []
-        for u in users_raw:
-            users_list.append({
-                "id": u[0],
-                "username": u[1],
-                "role": u[2],
-                "last_active": str(u[3]),
-                "created_at": str(u[4])
-            })
-
-        cur.execute("SELECT id, username, category, message, image_proof, created_at FROM complaints ORDER BY id DESC")
-        complaints_list = [
-            {
-                "id": r[0],
-                "username": r[1],
-                "category": r[2],
-                "message": r[3],
-                "image_proof": r[4],
-                "created_at": str(r[5])
-            }
-            for r in cur.fetchall()
-        ]
+        cur.execute("SELECT id, username, category, message, image_proof, status, created_at FROM complaints ORDER BY id DESC")
+        complaints_list = [{"id": r[0], "username": r[1], "category": r[2], "message": r[3], "image_proof": r[4], "status": r[5] or "Open", "created_at": str(r[6])} for r in cur.fetchall()]
 
         cur.execute("SELECT core_mode, COUNT(*) FROM sessions GROUP BY core_mode")
         core_dist = {r[0]: r[1] for r in cur.fetchall()}
@@ -565,6 +561,55 @@ def get_owner_telemetry(user_id: int = 0, username: str = ""):
             "users": users_list,
             "complaints": complaints_list
         })
+    finally:
+        conn.close()
+
+@app.post("/api/owner/announcement/set")
+def set_announcement(message: str = Form(...), username: str = Form(...)):
+    if username.strip().lower() != OWNER_USERNAME.lower():
+        return JSONResponse({"status": "error", "message": "Forbidden"}, status_code=403)
+    conn, engine = DBManager.get_conn()
+    cur = conn.cursor()
+    try:
+        msg = message.strip()
+        if engine == "postgres":
+            cur.execute("UPDATE announcements SET is_active = FALSE")
+            if msg:
+                cur.execute("INSERT INTO announcements (message, is_active) VALUES (%s, TRUE)", (msg,))
+        else:
+            cur.execute("UPDATE announcements SET is_active = 0")
+            if msg:
+                cur.execute("INSERT INTO announcements (message, is_active) VALUES (?, 1)", (msg,))
+        conn.commit()
+        return JSONResponse({"status": "ok"})
+    finally:
+        conn.close()
+
+@app.post("/api/owner/user/delete")
+def delete_user_by_owner(target_user_id: int = Form(...), username: str = Form(...)):
+    if username.strip().lower() != OWNER_USERNAME.lower():
+        return JSONResponse({"status": "error", "message": "Forbidden"}, status_code=403)
+    conn, engine = DBManager.get_conn()
+    cur = conn.cursor()
+    try:
+        sql = "DELETE FROM users WHERE id = %s" if engine == "postgres" else "DELETE FROM users WHERE id = ?"
+        cur.execute(sql, (target_user_id,))
+        conn.commit()
+        return JSONResponse({"status": "ok"})
+    finally:
+        conn.close()
+
+@app.post("/api/owner/complaint/status")
+def update_complaint_status(complaint_id: int = Form(...), new_status: str = Form(...), username: str = Form(...)):
+    if username.strip().lower() != OWNER_USERNAME.lower():
+        return JSONResponse({"status": "error", "message": "Forbidden"}, status_code=403)
+    conn, engine = DBManager.get_conn()
+    cur = conn.cursor()
+    try:
+        sql = "UPDATE complaints SET status = %s WHERE id = %s" if engine == "postgres" else "UPDATE complaints SET status = ? WHERE id = ?"
+        cur.execute(sql, (new_status, complaint_id))
+        conn.commit()
+        return JSONResponse({"status": "ok"})
     finally:
         conn.close()
 
@@ -734,7 +779,7 @@ async def read_aloud(text: str = Form(...)):
     return JSONResponse({"audio_base64": f"data:audio/mp3;base64,{audio_b64}"})
 
 # =====================================================================
-# 🛡️ DEDICATED OWNER COMMAND INTERFACE: /owner
+# 🛡️ SOVEREIGN COMMAND PORTAL ROUTE: /owner
 # =====================================================================
 @app.get("/owner", response_class=HTMLResponse)
 async def serve_owner_dashboard():
@@ -755,6 +800,7 @@ async def serve_owner_dashboard():
                 --card-border: rgba(255, 255, 255, 0.08);
                 --text-high: #f8fafc;
                 --text-muted: #94a3b8;
+                --red: #ef4444;
             }
             * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', sans-serif; }
             body { background: radial-gradient(circle at 50% 0%, #151b3d 0%, var(--bg-deep) 85%); color: var(--text-high); min-height: 100vh; display: flex; flex-direction: column; }
@@ -785,6 +831,21 @@ async def serve_owner_dashboard():
             .metric-title { font-size: 12px; color: var(--text-muted); text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; margin-bottom: 6px; }
             .metric-value { font-size: 32px; font-weight: 800; font-family: 'Space Grotesk', sans-serif; color: #fff; }
             .metric-tag { font-size: 11px; color: #fde047; margin-top: 6px; font-weight: 600; }
+
+            .broadcast-card {
+                background: linear-gradient(135deg, rgba(250, 204, 21, 0.08), rgba(20, 28, 48, 0.8));
+                border: 1px solid rgba(250, 204, 21, 0.3); border-radius: 20px; padding: 20px; display: flex; flex-direction: column; gap: 10px;
+            }
+            .broadcast-input-box { display: flex; gap: 10px; }
+            .broadcast-input-box input {
+                flex: 1; background: rgba(0, 0, 0, 0.4); border: 1px solid var(--card-border); border-radius: 12px;
+                padding: 12px 14px; color: #fff; font-size: 14px; outline: none;
+            }
+            .broadcast-input-box input:focus { border-color: var(--gold); }
+            .broadcast-btn {
+                background: linear-gradient(135deg, #facc15, #f59e0b); border: none; border-radius: 12px; padding: 0 20px;
+                color: #000; font-weight: 700; cursor: pointer; font-size: 13.5px;
+            }
 
             .sections-split { display: grid; grid-template-columns: 1.3fr 1fr; gap: 20px; }
             @media (max-width: 900px) { .sections-split { grid-template-columns: 1fr; } }
@@ -819,9 +880,13 @@ async def serve_owner_dashboard():
                 cursor: pointer; object-fit: cover; margin-top: 6px; display: block;
             }
 
-            .core-chip-grid { display: flex; flex-wrap: wrap; gap: 8px; }
-            .core-chip { background: rgba(255,255,255,0.05); border: 1px solid var(--card-border); padding: 8px 12px; border-radius: 10px; font-size: 12px; display: flex; align-items: center; gap: 6px; }
-            .core-chip b { color: #facc15; font-family: 'Space Grotesk', sans-serif; }
+            .action-btn-sm {
+                background: rgba(255,255,255,0.08); border: 1px solid var(--card-border); border-radius: 8px;
+                color: #fff; padding: 3px 8px; font-size: 11px; cursor: pointer;
+            }
+            .action-btn-sm:hover { background: var(--gold); color: #000; }
+            .action-btn-del { color: #f87171; border-color: rgba(248,113,113,0.3); }
+            .action-btn-del:hover { background: #ef4444; color: #fff; }
 
             .auth-modal { position: fixed; inset: 0; background: rgba(4,6,12,0.96); backdrop-filter: blur(25px); display: none; align-items: center; justify-content: center; z-index: 500; }
             .auth-box { background: #0c1222; border: 1px solid rgba(250,204,21,0.3); border-radius: 24px; padding: 32px; width: 90%; max-width: 380px; text-align: center; }
@@ -833,10 +898,10 @@ async def serve_owner_dashboard():
             <div class="auth-box">
                 <div style="font-size:36px; margin-bottom:8px;">🛡️</div>
                 <h2 style="font-family:'Space Grotesk'; font-size:20px; margin-bottom:6px;">Owner Verification</h2>
-                <p style="font-size:12px; color:var(--text-muted); margin-bottom:16px;">Restricted to <b>Utkarsh Bandhu</b>. Enter password to unlock.</p>
+                <p style="font-size:12px; color:var(--text-muted); margin-bottom:16px;">Restricted to <b>Utkarsh Bandhu</b>. Enter password to unlock sovereign telemetries.</p>
                 <input type="text" id="ownerUserInput" class="search-input" value="utkarsh" placeholder="Username" />
                 <input type="password" id="ownerPassInput" class="search-input" placeholder="Password" />
-                <button class="auth-btn" onclick="verifyOwnerAccess()">Unlock Telemetry</button>
+                <button class="auth-btn" onclick="verifyOwnerAccess()">Unlock Sovereign Console</button>
                 <div id="gateErr" style="color:#f87171; font-size:12px; margin-top:10px; display:none;">Access Denied.</div>
             </div>
         </div>
@@ -845,25 +910,39 @@ async def serve_owner_dashboard():
             <div class="brand">
                 <div class="brand-badge">🍋</div>
                 <div>
-                    <div class="brand-title">Lemon Sovereign Console</div>
-                    <div class="brand-sub">Creator: <b>Utkarsh Bandhu</b></div>
+                    <div class="brand-title">Lemon Sovereign Command</div>
+                    <div class="brand-sub">Master Mind: <b>Utkarsh Bandhu</b></div>
                 </div>
             </div>
             <div style="display:flex; align-items:center; gap:14px;">
-                <div class="status-pill"><div class="dot-pulse"></div> Live PostgreSQL Cloud</div>
+                <div class="status-pill"><div class="dot-pulse"></div> PostgreSQL Persistent Core</div>
                 <button onclick="location.href='/'" style="background:rgba(255,255,255,0.08); border:1px solid var(--card-border); color:#fff; padding:6px 14px; border-radius:14px; font-size:12px; cursor:pointer;">← Return to App</button>
             </div>
         </header>
 
         <main class="container">
+            <!-- Global Broadcast Banner Dispatcher -->
+            <div class="broadcast-card">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <b style="font-size:13.5px; color:#fde047;">📢 Push Global Announcement Banner to All Users</b>
+                    <span style="font-size:11px; color:#94a3b8;">Instantly renders at top of every user's screen</span>
+                </div>
+                <div class="broadcast-input-box">
+                    <input type="text" id="broadcastInput" placeholder="Type live alert (e.g. '🔥 New Vision Core v2 deployed! Upload math problems now')..." />
+                    <button class="broadcast-btn" onclick="publishAnnouncement()">Transmit Alert</button>
+                    <button class="broadcast-btn" style="background:#ef4444; color:#fff;" onclick="clearAnnouncement()">Clear</button>
+                </div>
+            </div>
+
+            <!-- Telemetry Metrics -->
             <div class="metrics-grid">
                 <div class="metric-card">
-                    <div class="metric-title">Total Website Visits</div>
+                    <div class="metric-title">Total Visits</div>
                     <div class="metric-value" id="valVisits">0</div>
                     <div class="metric-tag">● Persistent Cloud Counter</div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-title">Registered Accounts</div>
+                    <div class="metric-title">Registered Users</div>
                     <div class="metric-value" id="valUsers">0</div>
                     <div class="metric-tag">● Safe in PostgreSQL</div>
                 </div>
@@ -873,7 +952,7 @@ async def serve_owner_dashboard():
                     <div class="metric-tag">● Active in last 10 mins</div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-title">Complaints & Bug Reports</div>
+                    <div class="metric-title">Complaints / Reports</div>
                     <div class="metric-value" id="valComplaints" style="color:#f87171;">0</div>
                     <div class="metric-tag">● With Trouble Photos</div>
                 </div>
@@ -884,14 +963,8 @@ async def serve_owner_dashboard():
                 </div>
             </div>
 
-            <div class="panel">
-                <div class="panel-header">
-                    <div class="panel-title">⚡ Cognitive Chamber Usage Breakdown</div>
-                </div>
-                <div class="core-chip-grid" id="coreUsageGrid">Loading chamber stats...</div>
-            </div>
-
             <div class="sections-split">
+                <!-- User Registry with Action to Delete -->
                 <div class="panel">
                     <div class="panel-header">
                         <div class="panel-title">👥 Registered Accounts Registry</div>
@@ -906,7 +979,7 @@ async def serve_owner_dashboard():
                                     <th>Username</th>
                                     <th>Privilege</th>
                                     <th>Last Active</th>
-                                    <th>Registered On</th>
+                                    <th>Action</th>
                                 </tr>
                             </thead>
                             <tbody id="usersTbody">
@@ -916,9 +989,10 @@ async def serve_owner_dashboard():
                     </div>
                 </div>
 
+                <!-- Complaints & Trouble Photos with Status Change -->
                 <div class="panel">
                     <div class="panel-header">
-                        <div class="panel-title">🚨 Complaints & Bug Feed (With Photos)</div>
+                        <div class="panel-title">🚨 Complaints & Bug Feed (Trouble Photos)</div>
                         <button onclick="loadTelemetry()" style="background:none; border:none; color:var(--gold); font-size:12px; cursor:pointer;">↻ Refresh</button>
                     </div>
                     <div class="table-container" id="complaintsList">
@@ -979,18 +1053,6 @@ async def serve_owner_dashboard():
                     document.getElementById("valComplaints").innerText = d.complaints.length;
                     document.getElementById("valSessions").innerText = d.total_sessions;
 
-                    const coreBox = document.getElementById("coreUsageGrid");
-                    const cores = d.core_distribution || {};
-                    if (Object.keys(cores).length > 0) {
-                        coreBox.innerHTML = Object.entries(cores).map(([core, count]) => `
-                            <div class="core-chip">
-                                <span>${core.toUpperCase()}</span>: <b>${count} chats</b>
-                            </div>
-                        `).join("");
-                    } else {
-                        coreBox.innerHTML = "No chamber usage recorded yet.";
-                    }
-
                     fullUsersData = d.users || [];
                     renderUsersTable(fullUsersData);
 
@@ -1000,7 +1062,10 @@ async def serve_owner_dashboard():
                             <div class="complaint-box">
                                 <div class="complaint-top">
                                     <b style="color:#fde047;">${c.username}</b>
-                                    <span class="badge-cat">${c.category}</span>
+                                    <div>
+                                        <span class="badge-cat">${c.category}</span>
+                                        <span style="font-size:10px; margin-left:6px; color:${c.status === 'Resolved' ? '#4ade80' : '#f87171'};">[${c.status}]</span>
+                                    </div>
                                 </div>
                                 <div style="font-size:12.5px; color:#e2e8f0; margin-top:2px;">${c.message}</div>
                                 ${c.image_proof ? `
@@ -1011,7 +1076,13 @@ async def serve_owner_dashboard():
                                         <span style="font-size:10px; color:#94a3b8;">📷 Click thumbnail to inspect full resolution</span>
                                     </div>
                                 ` : ''}
-                                <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">${c.created_at}</div>
+                                <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px;">
+                                    <span style="font-size:10px; color:var(--text-muted);">${c.created_at}</span>
+                                    <div>
+                                        <button class="action-btn-sm" onclick="setComplaintStatus(${c.id}, 'Resolved')">✓ Resolve</button>
+                                        <button class="action-btn-sm action-btn-del" onclick="setComplaintStatus(${c.id}, 'Dismissed')">✕ Dismiss</button>
+                                    </div>
+                                </div>
                             </div>
                         `).join("");
                     } else {
@@ -1035,7 +1106,11 @@ async def serve_owner_dashboard():
                         <td><b>${u.username}</b></td>
                         <td><span style="color:${u.role === 'owner' ? '#facc15' : '#94a3b8'}; font-weight:${u.role === 'owner' ? '700' : '400'};">${u.role}</span></td>
                         <td style="color:#38bdf8; font-size:11.5px;">${u.last_active || 'Recent'}</td>
-                        <td style="color:#94a3b8; font-size:11px;">${u.created_at}</td>
+                        <td>
+                            ${u.username.toLowerCase() !== 'utkarsh' ? `
+                                <button class="action-btn-sm action-btn-del" onclick="deleteUserByOwner(${u.id}, '${u.username}')">Purge</button>
+                            ` : '<span style="font-size:11px; color:#facc15;">Master</span>'}
+                        </td>
                     </tr>
                 `).join("");
             }
@@ -1046,6 +1121,43 @@ async def serve_owner_dashboard():
                 renderUsersTable(filtered);
             }
 
+            async function publishAnnouncement() {
+                const msg = document.getElementById("broadcastInput").value.trim();
+                if (!msg) return alert("Enter announcement text.");
+                const fd = new FormData();
+                fd.append("message", msg);
+                fd.append("username", "utkarsh");
+                await fetch("/api/owner/announcement/set", { method: "POST", body: fd });
+                alert("Announcement broadcasted successfully to all users!");
+            }
+
+            async function clearAnnouncement() {
+                const fd = new FormData();
+                fd.append("message", "");
+                fd.append("username", "utkarsh");
+                await fetch("/api/owner/announcement/set", { method: "POST", body: fd });
+                document.getElementById("broadcastInput").value = "";
+                alert("Announcement cleared.");
+            }
+
+            async function deleteUserByOwner(id, name) {
+                if (!confirm(`Permanently purge account: ${name}?`)) return;
+                const fd = new FormData();
+                fd.append("target_user_id", id);
+                fd.append("username", "utkarsh");
+                await fetch("/api/owner/user/delete", { method: "POST", body: fd });
+                loadTelemetry();
+            }
+
+            async function setComplaintStatus(id, status) {
+                const fd = new FormData();
+                fd.append("complaint_id", id);
+                fd.append("new_status", status);
+                fd.append("username", "utkarsh");
+                await fetch("/api/owner/complaint/status", { method: "POST", body: fd });
+                loadTelemetry();
+            }
+
             setInterval(loadTelemetry, 25000);
             loadTelemetry();
         </script>
@@ -1054,7 +1166,7 @@ async def serve_owner_dashboard():
     """
 
 # =====================================================================
-# 🌐 MAIN USER INTERFACE: /
+# 🌐 MAIN USER INTERFACE ROUTE: /
 # =====================================================================
 @app.get("/", response_class=HTMLResponse)
 async def serve_app():
@@ -1065,7 +1177,7 @@ async def serve_app():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-        <title>Lemon AI | Pure Intellect & Cognitive Chambers</title>
+        <title>Lemon AI | Sovereign Intellect & Cognitive Chambers</title>
         <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
         <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
         <style>
@@ -1096,6 +1208,11 @@ async def serve_app():
             }
             ::-webkit-scrollbar-thumb:hover { background: linear-gradient(180deg, #fde047 0%, #eab308 100%); border-width: 2px; }
 
+            .broadcast-banner {
+                display: none; background: linear-gradient(90deg, #f59e0b, #ef4444); color: #000; font-size: 12.5px;
+                font-weight: 700; text-align: center; padding: 6px 12px; z-index: 1000;
+            }
+
             .overlay-modal {
                 position: fixed; inset: 0; background: rgba(5, 7, 15, 0.94); backdrop-filter: blur(20px);
                 display: none; align-items: center; justify-content: center; z-index: 3000;
@@ -1115,10 +1232,6 @@ async def serve_app():
             .action-submit-btn {
                 width: 100%; background: linear-gradient(135deg, #facc15, #f59e0b); border: none; border-radius: 14px;
                 padding: 13px; color: #0b0f19; font-weight: 700; font-size: 14.5px; cursor: pointer;
-            }
-            .auth-error {
-                display: none; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4);
-                color: #fca5a5; font-size: 12.5px; padding: 8px 12px; border-radius: 10px; margin-bottom: 12px;
             }
 
             .proof-preview-bar {
@@ -1303,7 +1416,7 @@ async def serve_app():
             .dock-status { font-size: 11.5px; color: var(--text-muted); text-align: center; margin-bottom: 6px; min-height: 16px; }
             .input-dock {
                 display: flex; align-items: center; background: rgba(24, 32, 50, 0.92); border: 1px solid rgba(255, 255, 255, 0.12);
-                border-radius: 36px; padding: 4px 6px 4px 18px; gap: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.45);
+                border-radius: 36px; padding: 4px 6px 4px 14px; gap: 6px; box-shadow: 0 10px 30px rgba(0,0,0,0.45);
             }
             .input-dock input { flex: 1; background: transparent; border: none; color: #fff; font-size: 14.5px; outline: none; }
             .input-dock input::placeholder { color: #64748b; }
@@ -1312,14 +1425,21 @@ async def serve_app():
                 width: 38px; height: 38px; border-radius: 50%; border: none; display: flex; align-items: center; justify-content: center; cursor: pointer;
             }
             .dock-btn:active { transform: scale(0.92); }
-            .cam-btn { background: rgba(255, 255, 255, 0.08); color: #38bdf8; font-size: 17px; }
+            .cam-btn { background: rgba(255, 255, 255, 0.08); color: #38bdf8; font-size: 16px; }
+            .doc-btn { background: rgba(255, 255, 255, 0.08); color: #a78bfa; font-size: 16px; }
             .mic-btn { background: rgba(255, 255, 255, 0.08); color: #facc15; font-size: 17px; }
             .mic-btn.active-record { background: #ef4444; color: #fff; animation: pulse 1.2s infinite; }
             @keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+            .stop-btn {
+                display: none; background: #ef4444; color: #fff; font-size: 14px; font-weight: 700; width: 38px; height: 38px; border-radius: 50%;
+            }
             .send-btn { background: linear-gradient(135deg, #facc15, #f59e0b); color: #0b0f19; font-size: 15px; font-weight: 700; }
         </style>
     </head>
     <body>
+        <!-- Global Broadcast Banner -->
+        <div class="broadcast-banner" id="globalBanner"></div>
+
         <!-- Camera Stream Modal -->
         <div class="camera-modal" id="cameraModal">
             <div class="camera-box">
@@ -1352,7 +1472,7 @@ async def serve_app():
             </div>
         </div>
 
-        <!-- USER FEEDBACK / COMPLAINT MODAL (WITH PHOTO ATTACHMENT) -->
+        <!-- USER FEEDBACK MODAL -->
         <div class="overlay-modal" id="feedbackModal">
             <div class="modal-card">
                 <h2>💬 Report Issue / Feedback</h2>
@@ -1397,7 +1517,7 @@ async def serve_app():
                 <button class="sidebar-close" onclick="closeSidebar()">✕</button>
             </div>
 
-            <button class="owner-menu-btn" id="ownerMenuBtn" onclick="location.href='/owner'">🛡️ Open Owner Portal</button>
+            <button class="owner-menu-btn" id="ownerMenuBtn" onclick="location.href='/owner'">🛡️ Open Sovereign Portal</button>
             <button class="feedback-menu-btn" onclick="openFeedbackModal()">💬 Report Issue / Feedback</button>
 
             <div class="sidebar-section-title">Launch Specific Chamber</div>
@@ -1432,14 +1552,17 @@ async def serve_app():
                     <div class="creator-tag">Engineered by <b>Utkarsh Bandhu</b></div>
                 </div>
             </div>
-            <div class="current-chamber-pill" id="currentChamberBadge">⚡ INTELLECT</div>
+            <div style="display:flex; align-items:center; gap:8px;">
+                <button onclick="exportCurrentChat()" style="background:rgba(255,255,255,0.06); border:1px solid var(--card-border); color:#fde047; padding:5px 12px; border-radius:14px; font-size:11.5px; font-weight:700; cursor:pointer;" title="Download Conversation as Markdown Note">💾 Export</button>
+                <div class="current-chamber-pill" id="currentChamberBadge">⚡ INTELLECT</div>
+            </div>
         </header>
 
         <main class="chat-container" id="chatStream">
             <div class="hero-greeting" id="heroGreeting">
                 <div class="hero-logo">🍋</div>
                 <div class="hero-title" id="heroGreetingName">Intellect Awaiting Inquiry</div>
-                <div class="hero-sub" id="heroGreetingSub">Pure cognitive architecture. Select any chamber from the menu to activate dedicated first-principles reasoning.</div>
+                <div class="hero-sub" id="heroGreetingSub">Pure cognitive architecture. Select any chamber to activate dedicated first-principles reasoning.</div>
                 <div class="hero-badge">
                     <span>⚡</span> Architected by Utkarsh Bandhu
                 </div>
@@ -1449,15 +1572,20 @@ async def serve_app():
         <footer class="bottom-dock">
             <div class="img-preview-bar" id="imgPreviewBar">
                 <img id="imgPreviewThumb" src="" alt="preview">
-                <span>Visual Artifact Loaded (Inspection Mode)</span>
+                <span id="imgPreviewLabel">Visual Artifact Attached</span>
                 <span class="img-remove-btn" onclick="clearAttachedImage()">✕</span>
             </div>
 
             <div class="dock-status" id="dockStatus">● Chamber Ready</div>
             <div class="input-dock">
-                <button class="dock-btn cam-btn" onclick="requestCameraAccess()" title="Request Camera / Attach Visual">📷</button>
-                <input type="text" id="textInput" placeholder="Pose an inquiry or upload artifact with 📷..." onkeydown="if(event.key==='Enter') sendTextQuery()" />
-                <button class="dock-btn mic-btn" id="micBtn" onclick="requestMicAndRecord()" title="Microphone Access">🎙️</button>
+                <button class="dock-btn cam-btn" onclick="requestCameraAccess()" title="Camera / Optical Inspection">📷</button>
+                <label class="dock-btn doc-btn" style="cursor:pointer;" title="Upload PDF or Document Code">
+                    📄
+                    <input type="file" id="docFileInput" accept=".pdf,.txt,.py,.js,.cpp,.c,.md" style="display:none;" onchange="handleDocFileUpload(event)">
+                </label>
+                <input type="text" id="textInput" placeholder="Pose an inquiry, attach code or PDF..." onkeydown="if(event.key==='Enter') sendTextQuery()" />
+                <button class="dock-btn mic-btn" id="micBtn" onclick="requestMicAndRecord()" title="Microphone">🎙️</button>
+                <button class="dock-btn stop-btn" id="stopBtn" onclick="stopLemonSpeaking()" title="Stop Speaking">⏹</button>
                 <button class="dock-btn send-btn" onclick="sendTextQuery()" title="Send">➤</button>
             </div>
         </footer>
@@ -1497,6 +1625,7 @@ async def serve_app():
             const chatStream = document.getElementById("chatStream");
             const textInput = document.getElementById("textInput");
             const micBtn = document.getElementById("micBtn");
+            const stopBtn = document.getElementById("stopBtn");
             const dockStatus = document.getElementById("dockStatus");
             const audioElement = document.getElementById("audioElement");
             const sidebarUsername = document.getElementById("sidebarUsername");
@@ -1505,12 +1634,45 @@ async def serve_app():
             const heroGreetingName = document.getElementById("heroGreetingName");
             const heroGreetingSub = document.getElementById("heroGreetingSub");
             const currentChamberBadge = document.getElementById("currentChamberBadge");
+            const globalBanner = document.getElementById("globalBanner");
 
             const cameraModal = document.getElementById("cameraModal");
             const cameraVideo = document.getElementById("cameraVideo");
             const cameraCanvas = document.getElementById("cameraCanvas");
             const imgPreviewBar = document.getElementById("imgPreviewBar");
             const imgPreviewThumb = document.getElementById("imgPreviewThumb");
+            const imgPreviewLabel = document.getElementById("imgPreviewLabel");
+
+            // Stop Lemon Feature
+            function stopLemonSpeaking() {
+                if (audioElement) {
+                    audioElement.pause();
+                    audioElement.currentTime = 0;
+                }
+                setThinking(false);
+                stopBtn.style.display = "none";
+                dockStatus.innerText = "● Stopped vocalization.";
+            }
+
+            audioElement.onplay = () => { stopBtn.style.display = "flex"; };
+            audioElement.onended = () => { stopBtn.style.display = "none"; };
+            audioElement.onpause = () => { stopBtn.style.display = "none"; };
+
+            // Real-Time Global Announcement Checker
+            async function fetchAnnouncement() {
+                try {
+                    const res = await fetch("/api/announcement");
+                    const d = await res.json();
+                    if (d.message) {
+                        globalBanner.innerText = "📢 " + d.message;
+                        globalBanner.style.display = "block";
+                    } else {
+                        globalBanner.style.display = "none";
+                    }
+                } catch(e) {}
+            }
+            setInterval(fetchAnnouncement, 20000);
+            fetchAnnouncement();
 
             function sendHeartbeat() {
                 if (currentUserId) {
@@ -1520,6 +1682,54 @@ async def serve_app():
                 }
             }
             setInterval(sendHeartbeat, 60000);
+
+            // PDF & Doc Parser
+            async function handleDocFileUpload(e) {
+                const file = e.target.files[0];
+                if (!file) return;
+                dockStatus.innerText = "● Parsing document artifact...";
+                const fd = new FormData();
+                fd.append("file", file);
+
+                try {
+                    const res = await fetch("/api/parse-doc", { method: "POST", body: fd });
+                    const d = await res.json();
+                    if (d.status === "ok") {
+                        textInput.value = `[Document Analyzed: ${d.filename}]\n\n${d.text}\n\nTask: Analyze and synthesize key takeaways.`;
+                        dockStatus.innerText = "● Document ingested. Hit ➤ to process.";
+                    } else {
+                        alert(d.message || "Failed to parse document.");
+                        dockStatus.innerText = "● Document parse error.";
+                    }
+                } catch(err) {
+                    alert("Document upload fault.");
+                }
+            }
+
+            // Export Chat
+            async function exportCurrentChat() {
+                if (!currentSessionId) return alert("Open a chat session first to export.");
+                try {
+                    const res = await fetch(`/api/session-messages/${currentSessionId}`);
+                    const d = await res.json();
+                    if (!d.messages || d.messages.length === 0) return alert("Chat has no messages to export.");
+
+                    let md = `# Lemon AI Session Export\n**Architect:** Utkarsh Bandhu\n**Chamber:** ${currentCoreMode.toUpperCase()}\n**Timestamp:** ${new Date().toLocaleString()}\n\n---\n\n`;
+                    d.messages.forEach(m => {
+                        md += `### ${m.role === 'assistant' ? 'Lemon (' + m.mode.toUpperCase() + ')' : 'User'}\n${m.content}\n\n`;
+                    });
+
+                    const blob = new Blob([md], { type: "text/markdown" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = `lemon_${currentCoreMode}_session_${currentSessionId}.md`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                } catch(e) {
+                    alert("Export fault.");
+                }
+            }
 
             function openFeedbackModal() { closeSidebar(); feedbackModal.style.display = "flex"; }
             function closeFeedbackModal() {
@@ -1556,9 +1766,7 @@ async def serve_app():
                 fd.append("username", currentUsername || "Anonymous");
                 fd.append("category", cat);
                 fd.append("message", msg);
-                if (reportPhotoBase64) {
-                    fd.append("image_proof", reportPhotoBase64);
-                }
+                if (reportPhotoBase64) fd.append("image_proof", reportPhotoBase64);
 
                 try {
                     const res = await fetch("/api/complaints/submit", { method: "POST", body: fd });
@@ -1886,6 +2094,7 @@ async def serve_app():
             function setThinking(active, label = "Executing first-principles synthesis...") {
                 if (active) {
                     dockStatus.innerText = `⚡ ${label}`;
+                    stopBtn.style.display = "flex";
                     if (!currentThinkingEl) {
                         currentThinkingEl = document.createElement("div");
                         currentThinkingEl.className = "bubble-group lemon";
@@ -1906,6 +2115,7 @@ async def serve_app():
 
             async function playSpecificMessage(text) {
                 dockStatus.innerText = "🔊 Vocalizing...";
+                stopBtn.style.display = "flex";
                 const fd = new FormData();
                 fd.append("text", text);
                 try {
