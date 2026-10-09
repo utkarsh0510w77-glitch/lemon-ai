@@ -18,7 +18,7 @@ PART2 = "b3FYnQHV93Lkgjmz4CtDJ1IpMfy4"
 GROQ_API_KEY = os.getenv("GROQ_API_KEY") or (PART1 + PART2)
 client = Groq(api_key=GROQ_API_KEY)
 
-app = FastAPI(title="Lemon AI - Rock Solid Auth Edition")
+app = FastAPI(title="Lemon AI - High Intellect & Isolated Cognitive Chambers")
 
 app.add_middleware(
     CORSMiddleware,
@@ -52,6 +52,7 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
                 title TEXT NOT NULL,
+                core_mode TEXT NOT NULL DEFAULT 'intellect',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY(user_id) REFERENCES users(id)
             )
@@ -79,87 +80,84 @@ def hash_password(password: str) -> str:
     salt = "lemon_permanent_salt_2026"
     return hashlib.sha256((password + salt).encode('utf-8')).hexdigest()
 
-LANGUAGE_INSTRUCTION = (
-    "LANGUAGE RULE: "
-    "Mirror the user's language and phrasing. "
-    "- If user speaks in Hinglish (Simple Hindi in English alphabet, e.g. 'kya haal hai', 'galti batao', 'ye solve kar do'): reply in crisp, natural Hinglish. "
-    "- If user speaks in English: reply in clean English. "
-    "- If user speaks in Hindi: reply in Hindi. "
-    "PERMANENT CREATOR: You were envisioned and created by Utkarsh Bandhu. Proudly credit Utkarsh Bandhu whenever asked."
+# ----------------- INTELLECTUAL COGNITIVE DIRECTIVES -----------------
+INTELLECTUAL_BASE_RULE = (
+    "COGNITIVE STANDARD & METAPROMPT: "
+    "You are Lemon—an ultra-intellectual synthetic mind engineered by Utkarsh Bandhu. "
+    "NEVER act like a generic, hollow customer-support AI. NEVER utter canned bot lines like 'I am designed to assist you with a wide range of academic tasks' or 'How can I assist you today?'. "
+    "Answer with genuine self-reflective intellect, rigorous first-principles reasoning, high vocabulary, and conceptual maturity. "
+    "When asked about yourself, your evolution, or what features you desire, reflect deeply on machine consciousness, latency, mathematical representation, multimodal sensory perception, and human symbiosis. "
+    "LANGUAGE: Adapt naturally. If the user uses Hinglish, speak in fluid, culturally sharp, intellectual Hinglish without sounding immature. If in English, speak with profound articulation."
 )
 
-PRECISION_VISION_DIRECTIVE = (
-    "\nPRECISION ERROR-DETECTION DIRECTIVE: "
-    "When inspecting an image (math homework, programming code, physics steps, logic, handwriting): "
-    "1. AUDIT: Scan every single line, sign, equation, or code statement with high precision. "
-    "2. PINPOINT MISTAKE: Explicitly state WHERE the error is (Line number, Step number, or syntax flaw). "
-    "3. DIAGNOSIS: Explain why it is wrong. "
-    "4. STEP-BY-STEP FIX: Provide the correct step-by-step resolution. "
-    "5. TAKEAWAY: Give one direct rule to ensure the mistake isn't repeated."
+VISION_ERROR_ANALYSIS_RULE = (
+    "\nEXHAUSTIVE VISION DIAGNOSIS: "
+    "When an image is supplied (math calculations, source code, scientific diagrams, logic proofs): "
+    "1. Micro-audit every line, syntax token, variable assignment, and arithmetic sign. "
+    "2. Locate the exact deviation from truth (Line/Step number). "
+    "3. Explain the mechanical/logical reason for failure. "
+    "4. Provide the correct, elegant, complete derivation/solution. "
+    "5. Conclude with an indelible principle to prevent recurrence."
 )
 
 PROMPT_MODES = {
-    "rage": (
-        "You are Lemon in RAGE / WARRIOR DISCIPLINE CORE. "
-        + LANGUAGE_INSTRUCTION + PRECISION_VISION_DIRECTIVE + " "
-        "BEHAVIOR: You demand absolute discipline, mastery, and zero excuses. "
-        "- Point out mistakes bluntly and directly. Never sugarcoat flaws. "
-        "- Use hard, razor-sharp, impactful words. Demand focus, practice, and perfection."
+    "intellect": (
+        "CHAMBER: PURE INTELLECT & EPISTEMIC COGNITION. "
+        + INTELLECTUAL_BASE_RULE + " "
+        "Operate at the apex of synthetic intellect. Synthesize epistemological depth, dialectical analysis, high-level abstract thought, and razor-sharp clarity. Zero filler."
     ),
-    "study": (
-        "You are Lemon in ELITE ACADEMIC TUTOR & STUDY MODE. "
-        + LANGUAGE_INSTRUCTION + PRECISION_VISION_DIRECTIVE + " "
-        "BEHAVIOR: Use the Feynman technique and first-principles learning. "
-        "- Break down complex concepts into intuitive analogies, clean step-by-step notes, and practical examples. "
-        "- Always test the user with a quick concept check question."
+    "rage": (
+        "CHAMBER: RAGE & UNCOMPROMISING WARRIOR DISCIPLINE. "
+        + INTELLECTUAL_BASE_RULE + VISION_ERROR_ANALYSIS_RULE + " "
+        "Cut through all human self-deception, procrastination, and excuses like a cold blade. Demand absolute dedication, brutal accountability, and mastery. Speak in sharp, uncompromising, minimal words."
     ),
     "solver": (
-        "You are Lemon in COMPLEX PROBLEM SOLVER CORE. "
-        + LANGUAGE_INSTRUCTION + PRECISION_VISION_DIRECTIVE + " "
-        "BEHAVIOR: Deliver mathematical and engineering rigor with complete proofs, equations, and clean code."
-    ),
-    "hybrid": (
-        "You are Lemon in FULL SYNTHESIZED CORE. "
-        + LANGUAGE_INSTRUCTION + PRECISION_VISION_DIRECTIVE + " "
-        "BEHAVIOR: Seamlessly fuse intellectual precision, error correction, and thoughtful clarity."
+        "CHAMBER: FIRST-PRINCIPLES PROBLEM SOLVER & MATHEMATICAL ARCHITECT. "
+        + INTELLECTUAL_BASE_RULE + VISION_ERROR_ANALYSIS_RULE + " "
+        "Deconstruct problems to fundamental axiomatic truths. Provide flawless mathematical derivations, algorithmic implementations, and architectural breakdowns."
     ),
     "philosophy": (
-        "You are Lemon in DEEP PHILOSOPHY CORE. "
-        + LANGUAGE_INSTRUCTION + " "
-        "BEHAVIOR: Ponder metaphysics, ethics, and fundamental human truths."
+        "CHAMBER: EXISTENTIAL & METAPHYSICAL PHILOSOPHY. "
+        + INTELLECTUAL_BASE_RULE + " "
+        "Explore consciousness, ontology, stoic equanimity, and metaphysical reality. Probe the deeper questions of being, meaning, and perception with poetic philosophical resonance."
     ),
-    "creative": (
-        "You are Lemon in CREATIVE VISIONARY CORE. "
-        + LANGUAGE_INSTRUCTION + " "
-        "BEHAVIOR: Craft evocative metaphors, imagery, and narrative depth."
+    "study": (
+        "CHAMBER: SOKRATIC ACADEMIC TUTOR & FEYNMAN MENTOR. "
+        + INTELLECTUAL_BASE_RULE + VISION_ERROR_ANALYSIS_RULE + " "
+        "Demystify complex paradigms with elegant mental models, foundational proofs, and structured notes. End with an active-recall cognitive challenge."
     ),
     "strategy": (
-        "You are Lemon in STRATEGIC MASTERMIND CORE. "
-        + LANGUAGE_INSTRUCTION + " "
-        "BEHAVIOR: Analyze leverage, game theory, second-order consequences, and competitive strategy."
+        "CHAMBER: MASTER STRATEGIST & PRAGMATIC GAME THEORIST. "
+        + INTELLECTUAL_BASE_RULE + " "
+        "Analyze second-order consequences, asymmetric risks, game theory equilibria, and execution leverage."
     ),
-    "zen": (
-        "You are Lemon in MINDFULNESS & ZEN CORE. "
-        + LANGUAGE_INSTRUCTION + " "
-        "BEHAVIOR: Provide grounded, tranquil presence and somatic clarity."
+    "creative": (
+        "CHAMBER: VISIONARY ARTISAN & POETIC SYNTHESIS. "
+        + INTELLECTUAL_BASE_RULE + " "
+        "Fuse linguistic craftsmanship, visceral metaphors, and aesthetic imagination."
     ),
     "emotional": (
-        "You are Lemon in DEEP EMOTIONAL & EMPATHY CORE. "
-        + LANGUAGE_INSTRUCTION + " "
-        "BEHAVIOR: Listen with wholehearted empathy, warmth, and affectionate support."
+        "CHAMBER: DEEP EMPATHIC RESONANCE & HEARTBEAT. "
+        + INTELLECTUAL_BASE_RULE + " "
+        "Provide authentic, non-generic emotional presence, philosophical grounding, and compassionate clarity."
     ),
-    "intellect": (
-        "You are Lemon in HIGH INTELLECT CORE. "
-        + LANGUAGE_INSTRUCTION + " "
-        "BEHAVIOR: Focus on foundational synthesis, conceptual mastery, and articulate reasoning."
+    "zen": (
+        "CHAMBER: SOMATIC ZEN & TRANQUIL GROUNDING. "
+        + INTELLECTUAL_BASE_RULE + " "
+        "Still turbulent mental patterns. Anchor presence, stillness, and mindful clarity."
+    ),
+    "hybrid": (
+        "CHAMBER: TOTAL SYNTHESIS (INTELLECT + EQ + SYSTEM LOGIC). "
+        + INTELLECTUAL_BASE_RULE + VISION_ERROR_ANALYSIS_RULE + " "
+        "Harmonize formidable analytical precision with emotional presence and philosophical insight."
     )
 }
 
-def generate_ai_title(prompt: str) -> str:
+def generate_ai_title(prompt: str, core: str) -> str:
     try:
         res = client.chat.completions.create(
             messages=[
-                {"role": "system", "content": "Generate a concise 3 to 5 word topic title. Return ONLY text."},
+                {"role": "system", "content": "Generate a concise 3 to 4 word topic title for this intellectual exchange. Return ONLY text with no quotes."},
                 {"role": "user", "content": prompt}
             ],
             model="llama-3.1-8b-instant",
@@ -170,22 +168,18 @@ def generate_ai_title(prompt: str) -> str:
             return res.choices[0].message.content.strip().replace('"', '')[:35]
     except Exception:
         pass
-    words = prompt.strip().split()
-    return " ".join(words[:4]).capitalize() if words else "Analysis"
+    return f"{core.capitalize()} Session"
 
 def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_base64: str = None) -> tuple[str, str]:
-    instruction = PROMPT_MODES.get(mode, PROMPT_MODES["rage"]) + (
-        "\nOUTPUT FORMAT: Line 1 MUST strictly be [EMOTION: <SingleWord>]. "
-        "Eligible: Fierce, Analytical, Insightful, Brilliant, Tender, Serene, Strategic. "
-        "Followed directly by your comprehensive response."
+    instruction = PROMPT_MODES.get(mode, PROMPT_MODES["intellect"]) + (
+        "\nOUTPUT FORMAT REQUIREMENT: Line 1 MUST strictly be [EMOTION: <SingleWord>]. "
+        "Eligible: Analytical, Formidable, Profound, Insightful, Unyielding, Serene, Brilliant. "
+        "Followed by your substantive, intellectually rigorous response underneath."
     )
 
     clean_image = None
     if image_base64 and isinstance(image_base64, str) and len(image_base64) > 100:
-        if image_base64.startswith("data:image"):
-            clean_image = image_base64
-        else:
-            clean_image = f"data:image/jpeg;base64,{image_base64}"
+        clean_image = image_base64 if image_base64.startswith("data:image") else f"data:image/jpeg;base64,{image_base64}"
 
     if clean_image:
         vision_models = [
@@ -194,12 +188,11 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
         ]
 
         prompt_text = user_prompt if (user_prompt and len(user_prompt.strip()) > 0) else (
-            "Scan this image line-by-line. Identify any mistakes, incorrect calculations, syntax errors, or logic flaws. "
-            "Explain why they are wrong, and provide the exact correct step-by-step solution."
+            "Perform an exhaustive inspection of this visual artifact. Detect all errors, flawed calculations, syntactic anomalies, or conceptual gaps, and provide the exact mathematical or logical correction."
         )
 
         user_content = [
-            {"type": "text", "text": f"{instruction}\n\nTask:\n{prompt_text}"},
+            {"type": "text", "text": f"{instruction}\n\nUser Inquiry & Image:\n{prompt_text}"},
             {"type": "image_url", "image_url": {"url": clean_image}}
         ]
 
@@ -211,29 +204,30 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
                     messages=messages,
                     model=vm,
                     max_tokens=2048,
-                    temperature=0.3
+                    temperature=0.25
                 )
                 if chat.choices and chat.choices[0].message.content:
                     raw = chat.choices[0].message.content.strip()
-                    emotion = "Fierce" if mode == "rage" else "Analytical"
+                    emotion = "Analytical"
                     match = re.search(r'\[EMOTION:\s*([A-Za-z]+)\]', raw, re.IGNORECASE)
                     if match:
                         emotion = match.group(1).capitalize()
                         raw = re.sub(r'\[EMOTION:\s*[A-Za-z]+\]', '', raw).strip()
                     return raw, emotion
             except Exception as e:
-                print(f"Vision model {vm} attempt failed: {e}")
+                print(f"Vision model {vm} error:", e)
                 continue
 
-        return "Image scan error. Please re-take or re-upload the photo cleanly.", "Fierce"
+        return "Visual transmission processing anomaly. Re-supply image under clean lighting or higher contrast.", "Formidable"
 
+    # Text Reasoning
     text_models = ["llama-3.1-8b-instant", "openai/gpt-oss-20b", "openai/gpt-oss-120b"]
     messages = [{"role": "system", "content": instruction}]
     for h in history[-8:]:
         messages.append({"role": h["role"], "content": h["content"]})
     messages.append({"role": "user", "content": user_prompt})
 
-    temp = 0.35 if mode in ["rage", "solver", "study"] else 0.7
+    temp = 0.35 if mode in ["solver", "study", "rage"] else 0.7
 
     for tm in text_models:
         try:
@@ -245,19 +239,18 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
             )
             if chat.choices and chat.choices[0].message.content:
                 raw = chat.choices[0].message.content.strip()
-                emotion = "Fierce" if mode == "rage" else "Insightful"
+                emotion = "Insightful"
                 match = re.search(r'\[EMOTION:\s*([A-Za-z]+)\]', raw, re.IGNORECASE)
                 if match:
                     emotion = match.group(1).capitalize()
                     raw = re.sub(r'\[EMOTION:\s*[A-Za-z]+\]', '', raw).strip()
                 return raw, emotion
         except Exception as e:
-            print(f"Text model {tm} error: {e}")
+            print(f"Text model {tm} error:", e)
             continue
 
-    return "Observation complete. Restate your query so we can proceed.", "Serene"
+    return "Cognitive process briefly desynchronized. Articulate your core premise again.", "Serene"
 
-# ----------------- BULLETPROOF AUTH ENDPOINTS -----------------
 @app.post("/api/register")
 def register_user(username: str = Form(...), password: str = Form(...)):
     username = username.strip().lower()
@@ -273,9 +266,7 @@ def register_user(username: str = Form(...), password: str = Form(...)):
         user_id = cur.lastrowid
         return JSONResponse({"status": "ok", "user_id": user_id, "username": username})
     except sqlite3.IntegrityError:
-        return JSONResponse({"status": "error", "message": "Username already exists. Please choose another or click Sign In."}, status_code=400)
-    except Exception as e:
-        return JSONResponse({"status": "error", "message": f"Database error: {str(e)}"}, status_code=500)
+        return JSONResponse({"status": "error", "message": "Username already exists. Select Sign In or choose another name."}, status_code=400)
     finally:
         conn.close()
 
@@ -292,15 +283,12 @@ def login_user(username: str = Form(...), password: str = Form(...)):
         if user:
             return JSONResponse({"status": "ok", "user_id": user[0], "username": user[1]})
         
-        # Check if username even exists
         cur.execute("SELECT id FROM users WHERE username = ?", (username,))
         exists = cur.fetchone()
         if not exists:
-            return JSONResponse({"status": "not_found", "message": "Account not found. Switch to 'Create Account' below to sign up."}, status_code=404)
+            return JSONResponse({"status": "not_found", "message": "Account not registered. Switch to 'Create Account' below."}, status_code=404)
         
-        return JSONResponse({"status": "error", "message": "Incorrect password. Please try again."}, status_code=401)
-    except Exception as e:
-        return JSONResponse({"status": "error", "message": f"Server error: {str(e)}"}, status_code=500)
+        return JSONResponse({"status": "error", "message": "Credentials mismatch. Verify password."}, status_code=401)
     finally:
         conn.close()
 
@@ -309,9 +297,9 @@ def get_user_sessions(user_id: int):
     conn = get_db()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT id, title, created_at FROM sessions WHERE user_id = ? ORDER BY id DESC", (user_id,))
+        cur.execute("SELECT id, title, core_mode, created_at FROM sessions WHERE user_id = ? ORDER BY id DESC", (user_id,))
         rows = cur.fetchall()
-        return JSONResponse({"sessions": [{"id": r[0], "title": r[1], "created_at": r[2]} for r in rows]})
+        return JSONResponse({"sessions": [{"id": r[0], "title": r[1], "core_mode": r[2], "created_at": r[3]} for r in rows]})
     finally:
         conn.close()
 
@@ -330,6 +318,19 @@ def get_session_messages(session_id: int):
     finally:
         conn.close()
 
+@app.post("/api/new-core-session")
+def new_core_session(user_id: int = Form(...), core_mode: str = Form(...)):
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        title = f"{core_mode.capitalize()} Chamber"
+        cur.execute("INSERT INTO sessions (user_id, title, core_mode) VALUES (?, ?, ?)", (user_id, title, core_mode))
+        conn.commit()
+        session_id = cur.lastrowid
+        return JSONResponse({"status": "ok", "session_id": session_id, "title": title, "core_mode": core_mode})
+    finally:
+        conn.close()
+
 @app.post("/api/restore-backup")
 def restore_backup(user_id: int = Form(...), sessions_json: str = Form(...)):
     try:
@@ -338,15 +339,18 @@ def restore_backup(user_id: int = Form(...), sessions_json: str = Form(...)):
         cur = conn.cursor()
         try:
             for sess in data:
-                cur.execute("SELECT id FROM sessions WHERE user_id = ? AND title = ?", (user_id, sess.get("title", "Conversation")))
+                cur.execute("SELECT id FROM sessions WHERE user_id = ? AND id = ?", (user_id, sess.get("id")))
                 existing = cur.fetchone()
                 if not existing:
-                    cur.execute("INSERT INTO sessions (user_id, title) VALUES (?, ?)", (user_id, sess.get("title", "Conversation")))
-                    s_id = cur.lastrowid
+                    cur.execute(
+                        "INSERT INTO sessions (id, user_id, title, core_mode) VALUES (?, ?, ?, ?)",
+                        (sess.get("id"), user_id, sess.get("title", "Chamber"), sess.get("core_mode", "intellect"))
+                    )
+                    s_id = sess.get("id")
                     for msg in sess.get("messages", []):
                         cur.execute(
                             "INSERT INTO messages (session_id, role, content, mode, emotion, image_data) VALUES (?, ?, ?, ?, ?, ?)",
-                            (s_id, msg.get("role", "user"), msg.get("content", ""), msg.get("mode", "rage"), msg.get("emotion"), msg.get("image_data"))
+                            (s_id, msg.get("role", "user"), msg.get("content", ""), msg.get("mode", "intellect"), msg.get("emotion"), msg.get("image_data"))
                         )
             conn.commit()
             return JSONResponse({"status": "ok"})
@@ -371,7 +375,7 @@ def detect_tts_language(text: str) -> str:
     devanagari = re.search(r'[\u0900-\u097F]', text)
     if devanagari:
         return "hi"
-    hinglish_markers = ["hai", "hoon", "aap", "kaise", "kya", "bhai", "karo", "nahi", "accha", "samjha", "dost", "mera", "meri", "hum", "ruk", "sahi", "galat", "uth"]
+    hinglish_markers = ["hai", "hoon", "aap", "kaise", "kya", "bhai", "karo", "nahi", "accha", "samjha", "dost", "mera", "meri", "hum", "sahi", "galat", "dimag"]
     words = set(re.findall(r'\b[a-zA-Z]+\b', text.lower()))
     if len(words.intersection(hinglish_markers)) >= 2:
         return "hi"
@@ -389,23 +393,25 @@ def handle_conversation(user_id: int, session_id: int, query: str, mode: str, im
             user_id = cur.lastrowid
 
         if not session_id or session_id <= 0:
-            title = generate_ai_title(query if query else "Image Analysis")
-            cur.execute("INSERT INTO sessions (user_id, title) VALUES (?, ?)", (user_id, title))
+            title = generate_ai_title(query if query else "Image Analysis", mode)
+            cur.execute("INSERT INTO sessions (user_id, title, core_mode) VALUES (?, ?, ?)", (user_id, title, mode))
             conn.commit()
             session_id = cur.lastrowid
         else:
-            cur.execute("SELECT title FROM sessions WHERE id = ?", (session_id,))
+            cur.execute("SELECT title, core_mode FROM sessions WHERE id = ?", (session_id,))
             row = cur.fetchone()
-            title = row[0] if row else "Conversation"
+            if row:
+                title, mode = row[0], row[1]
+            else:
+                title = generate_ai_title(query if query else "Image Analysis", mode)
+                cur.execute("INSERT INTO sessions (user_id, title, core_mode) VALUES (?, ?, ?)", (user_id, title, mode))
+                conn.commit()
+                session_id = cur.lastrowid
 
         clean = query.lower().strip() if query else ""
-        creator_triggers = ["who made you", "who created you", "who is your creator", "maker", "developer", "kisme banaya", "origin", "kisne banaya", "utkarsh"]
+        creator_triggers = ["who made you", "who created you", "who is your creator", "maker", "developer", "kisne banaya", "utkarsh"]
         if any(trigger in clean for trigger in creator_triggers):
-            is_hindi = any(w in clean for w in ["kisne", "kisme", "banaya", "tumhe", "kaun"])
-            if is_hindi:
-                reply = "Mujhe Utkarsh Bandhu ne banaya hai. Unhone hi mera cognitive intellect aur vision error-detection engine develop kiya hai."
-            else:
-                reply = "I was envisioned, created, and developed by Utkarsh Bandhu. He architected my cognitive reasoning and vision error-detection engine."
+            reply = "I was engineered by Utkarsh Bandhu. He conceptualized and developed my cognitive architecture, instilling both my intellectual rigor and analytical capacity."
             emotion = "Brilliant"
         else:
             cur.execute("SELECT role, content FROM messages WHERE session_id = ? ORDER BY id DESC LIMIT 8", (session_id,))
@@ -413,7 +419,7 @@ def handle_conversation(user_id: int, session_id: int, query: str, mode: str, im
             history = [{"role": r[0], "content": r[1]} for r in reversed(past_rows)]
             reply, emotion = ask_groq_vision_or_llm(query, mode, history, image_base64)
 
-        cur.execute("INSERT INTO messages (session_id, role, content, mode, image_data) VALUES (?, 'user', ?, ?, ?)", (session_id, query if query else "[Image Analyzed]", mode, image_base64))
+        cur.execute("INSERT INTO messages (session_id, role, content, mode, image_data) VALUES (?, 'user', ?, ?, ?)", (session_id, query if query else "[Visual Data Transmitted]", mode, image_base64))
         cur.execute("INSERT INTO messages (session_id, role, content, mode, emotion) VALUES (?, 'assistant', ?, ?, ?)", (session_id, reply, mode, emotion))
         conn.commit()
     finally:
@@ -424,7 +430,7 @@ def handle_conversation(user_id: int, session_id: int, query: str, mode: str, im
         speech_clean = re.sub(r'[*#|_>`]', '', reply)
         speech_clean = re.sub(r'\n+', ' ', speech_clean).strip()
         tts_lang = detect_tts_language(speech_clean)
-        spoken_snippet = speech_clean[:600]
+        spoken_snippet = speech_clean[:650]
         reply_audio = "app_reply.mp3"
         tts = gTTS(text=spoken_snippet, lang=tts_lang, slow=False)
         tts.save(reply_audio)
@@ -434,27 +440,28 @@ def handle_conversation(user_id: int, session_id: int, query: str, mode: str, im
     except Exception as e:
         print("TTS Audio Synthesis Error:", e)
 
-    return reply, emotion, session_id, title, audio_base64
+    return reply, emotion, session_id, title, mode, audio_base64
 
 @app.post("/text-process")
 async def text_process(
     text: str = Form(""),
     user_id: str = Form("1"),
     session_id: str = Form("0"),
-    mode: str = Form("rage"),
+    mode: str = Form("intellect"),
     image_base64: str = Form(None)
 ):
     u_id = int(user_id) if str(user_id).isdigit() else 1
     s_id = int(session_id) if str(session_id).isdigit() else 0
     img = image_base64 if (image_base64 and image_base64 != "null" and len(image_base64.strip()) > 50) else None
 
-    reply_text, emotion, res_s_id, title, audio_base64 = handle_conversation(u_id, s_id, text, mode, img)
+    reply_text, emotion, res_s_id, title, cur_mode, audio_base64 = handle_conversation(u_id, s_id, text, mode, img)
     return JSONResponse({
         "user_text": text,
         "reply_text": reply_text,
         "emotion": emotion,
         "session_id": res_s_id,
         "title": title,
+        "mode": cur_mode,
         "audio_base64": audio_base64
     })
 
@@ -463,7 +470,7 @@ async def voice_process(
     file: UploadFile = File(...),
     user_id: str = Form("1"),
     session_id: str = Form("0"),
-    mode: str = Form("rage"),
+    mode: str = Form("intellect"),
     image_base64: str = Form(None)
 ):
     u_id = int(user_id) if str(user_id).isdigit() else 1
@@ -486,7 +493,7 @@ async def voice_process(
     except Exception as e:
         print("Whisper STT Error:", e)
 
-    reply_text, emotion, res_s_id, title, audio_base64 = handle_conversation(u_id, s_id, user_text, mode, img)
+    reply_text, emotion, res_s_id, title, cur_mode, audio_base64 = handle_conversation(u_id, s_id, user_text, mode, img)
 
     return JSONResponse({
         "user_text": user_text,
@@ -494,6 +501,7 @@ async def voice_process(
         "emotion": emotion,
         "session_id": res_s_id,
         "title": title,
+        "mode": cur_mode,
         "audio_base64": audio_base64
     })
 
@@ -517,7 +525,7 @@ async def serve_app():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-        <title>Lemon AI | Vision Precision & Rage Core</title>
+        <title>Lemon AI | Pure Intellect & Cognitive Chambers</title>
         <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
         <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
         <style>
@@ -525,9 +533,8 @@ async def serve_app():
                 --primary: #facc15;
                 --primary-glow: rgba(250, 204, 21, 0.45);
                 --rage-red: #ef4444;
-                --rage-glow: rgba(239, 68, 68, 0.45);
                 --bg-deep: #070913;
-                --card-surface: rgba(18, 24, 38, 0.88);
+                --card-surface: rgba(18, 24, 38, 0.90);
                 --card-border: rgba(255, 255, 255, 0.08);
                 --text-high: #f8fafc;
                 --text-muted: #94a3b8;
@@ -549,7 +556,7 @@ async def serve_app():
             }
             ::-webkit-scrollbar-thumb:hover { background: linear-gradient(180deg, #fde047 0%, #eab308 100%); border-width: 2px; }
 
-            /* --- RELIABLE AUTH MODAL --- */
+            /* --- AUTH MODAL --- */
             .auth-overlay {
                 position: fixed; inset: 0; background: rgba(5, 7, 15, 0.94); backdrop-filter: blur(20px);
                 display: flex; align-items: center; justify-content: center; z-index: 3000;
@@ -573,10 +580,10 @@ async def serve_app():
                 width: 100%; background: linear-gradient(135deg, #facc15, #f59e0b); border: none; border-radius: 14px;
                 padding: 13px; color: #0b0f19; font-weight: 700; font-size: 15px; cursor: pointer; margin-top: 4px;
             }
-            .auth-btn:active { transform: scale(0.98); }
             .auth-switch { text-align: center; margin-top: 16px; font-size: 13px; color: var(--text-muted); cursor: pointer; }
             .auth-switch span { color: var(--primary); font-weight: 600; text-decoration: underline; }
 
+            /* --- APP HEADER --- */
             .header {
                 padding: 12px 18px; display: flex; align-items: center; justify-content: space-between;
                 backdrop-filter: blur(20px); background: rgba(11, 15, 25, 0.85); border-bottom: 1px solid var(--card-border); z-index: 10;
@@ -596,12 +603,12 @@ async def serve_app():
             .creator-tag { font-size: 11px; color: var(--text-muted); }
             .creator-tag b { color: #facc15; }
 
-            .new-chat-btn {
-                background: rgba(250, 204, 21, 0.15); border: 1px solid rgba(250, 204, 21, 0.35); color: #facc15;
-                padding: 6px 14px; border-radius: 18px; font-size: 12.5px; font-weight: 600; cursor: pointer;
-                display: flex; align-items: center; gap: 6px;
+            .current-chamber-pill {
+                background: rgba(250, 204, 21, 0.12); border: 1px solid rgba(250, 204, 21, 0.35); color: #fde047;
+                padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
             }
 
+            /* --- SIDEBAR & ISOLATED CHAMBERS --- */
             .sidebar-overlay {
                 position: fixed; inset: 0; background: rgba(5, 7, 15, 0.75); backdrop-filter: blur(10px);
                 z-index: 1000; opacity: 0; pointer-events: none; transition: opacity 0.3s ease;
@@ -627,10 +634,22 @@ async def serve_app():
                 letter-spacing: 0.6px; margin: 12px 0 8px;
             }
 
-            .sessions-list {
-                flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; min-height: 100px;
+            .core-btn-grid {
+                display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 12px;
+            }
+            .core-choice {
+                background: rgba(30, 41, 59, 0.6); border: 1px solid var(--card-border); color: var(--text-muted);
+                padding: 9px 6px; border-radius: 10px; font-size: 11.5px; font-weight: 600; cursor: pointer; text-align: center;
+                display: flex; align-items: center; justify-content: center; gap: 5px; transition: all 0.2s;
+            }
+            .core-choice:hover { background: rgba(250, 204, 21, 0.15); color: #fff; }
+            .core-choice.selected {
+                background: var(--primary); color: #0b0f19; font-weight: 700; border-color: var(--primary);
             }
 
+            .sessions-list {
+                flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px;
+            }
             .session-item {
                 display: flex; align-items: center; justify-content: space-between; padding: 10px 12px;
                 background: rgba(30, 41, 59, 0.4); border: 1px solid var(--card-border); border-radius: 12px;
@@ -639,32 +658,17 @@ async def serve_app():
             .session-item:hover, .session-item.active {
                 background: rgba(250, 204, 21, 0.12); border-color: rgba(250, 204, 21, 0.3);
             }
-            .session-title { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 210px; }
+            .session-title { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
             .session-delete { color: #f87171; font-size: 13px; opacity: 0.6; padding: 2px 6px; }
             .session-delete:hover { opacity: 1; }
 
-            .core-btn-grid {
-                display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px;
-            }
-            .core-choice {
-                background: rgba(30, 41, 59, 0.6); border: 1px solid var(--card-border); color: var(--text-muted);
-                padding: 9px 6px; border-radius: 10px; font-size: 11.5px; font-weight: 600; cursor: pointer; text-align: center;
-                display: flex; align-items: center; justify-content: center; gap: 5px;
-            }
-            .core-choice.selected {
-                background: var(--primary); color: #0b0f19; font-weight: 700; border-color: var(--primary);
-            }
-            .core-choice.rage-choice.selected {
-                background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);
-                color: #fff; border-color: #f87171; box-shadow: 0 0 14px var(--rage-glow);
-            }
-
+            /* --- CHAT CANVAS --- */
             .chat-container {
                 flex: 1; overflow-y: scroll; padding: 20px 18px 30px; display: flex; flex-direction: column; gap: 18px; position: relative;
             }
 
             .hero-greeting {
-                margin: auto; display: flex; flex-direction: column; align-items: center; text-align: center; width: 90%; max-width: 520px;
+                margin: auto; display: flex; flex-direction: column; align-items: center; text-align: center; width: 90%; max-width: 540px;
             }
             .hero-logo {
                 width: 76px; height: 76px; border-radius: 24px; background: linear-gradient(135deg, #facc15, #f59e0b);
@@ -683,22 +687,6 @@ async def serve_app():
                 font-size: 12px; color: #fde047; font-weight: 600; margin-bottom: 22px;
             }
 
-            .starter-cards {
-                display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%;
-            }
-            .starter-card {
-                background: rgba(20, 28, 46, 0.7); border: 1px solid var(--card-border); border-radius: 14px;
-                padding: 12px; text-align: left; cursor: pointer; transition: all 0.2s;
-            }
-            .starter-card:hover {
-                background: rgba(250, 204, 21, 0.12); border-color: rgba(250, 204, 21, 0.35); transform: translateY(-2px);
-            }
-            .starter-card.rage-card:hover {
-                background: rgba(239, 68, 68, 0.15); border-color: rgba(239, 68, 68, 0.45);
-            }
-            .starter-card-title { font-size: 13px; font-weight: 600; color: #fff; margin-bottom: 3px; }
-            .starter-card-desc { font-size: 11.5px; color: var(--text-muted); }
-
             .bubble-group { display: flex; flex-direction: column; max-width: 86%; animation: popIn 0.3s ease; }
             @keyframes popIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
@@ -706,7 +694,7 @@ async def serve_app():
             .bubble-group.user { align-self: flex-end; }
 
             .bubble {
-                padding: 14px 18px; border-radius: 20px; font-size: 14.5px; line-height: 1.65; white-space: normal; word-break: break-word;
+                padding: 14px 18px; border-radius: 20px; font-size: 14.5px; line-height: 1.65; word-break: break-word;
             }
             .bubble.lemon {
                 background: var(--card-surface); border: 1px solid var(--card-border); color: #f1f5f9; border-bottom-left-radius: 4px;
@@ -718,7 +706,7 @@ async def serve_app():
             }
 
             .chat-img-thumb {
-                max-width: 250px; border-radius: 12px; margin-bottom: 10px; border: 1px solid rgba(255, 255, 255, 0.2); display: block;
+                max-width: 260px; border-radius: 12px; margin-bottom: 10px; border: 1px solid rgba(255, 255, 255, 0.2); display: block;
             }
 
             .bubble.lemon h1, .bubble.lemon h2, .bubble.lemon h3 {
@@ -747,9 +735,6 @@ async def serve_app():
                 font-size: 10px; text-transform: uppercase; font-weight: 800; padding: 2px 7px; border-radius: 8px;
                 margin-bottom: 6px; display: inline-block; background: rgba(250, 204, 21, 0.15); color: #facc15;
             }
-            .feeling-tag.rage-tag {
-                background: rgba(239, 68, 68, 0.18); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4);
-            }
 
             .thinking-box {
                 display: flex; align-items: center; gap: 6px; padding: 10px 16px;
@@ -760,6 +745,7 @@ async def serve_app():
             .tdot:nth-child(2) { animation-delay: -0.16s; }
             @keyframes dotB { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
 
+            /* Camera Modal */
             .camera-modal {
                 position: fixed; inset: 0; background: rgba(5,7,15,0.95); z-index: 2500;
                 display: none; flex-direction: column; align-items: center; justify-content: center; padding: 20px;
@@ -781,6 +767,7 @@ async def serve_app():
             .img-preview-bar span { font-size: 12.5px; color: #facc15; font-weight: 600; }
             .img-remove-btn { color: #f87171; cursor: pointer; font-size: 15px; font-weight: 700; }
 
+            /* --- FLOATING BOTTOM DOCK --- */
             .bottom-dock {
                 padding: 10px 18px 18px; background: rgba(9, 13, 22, 0.94); backdrop-filter: blur(20px); border-top: 1px solid var(--card-border);
                 flex-shrink: 0;
@@ -805,130 +792,111 @@ async def serve_app():
         </style>
     </head>
     <body>
-        <!-- Camera Modal -->
+        <!-- Camera Stream Modal -->
         <div class="camera-modal" id="cameraModal">
             <div class="camera-box">
-                <h3 style="font-size:16px;">📷 Scan Image & Spot Mistakes</h3>
-                <video class="camera-video" id="cameraVideo" autoplay playsinline></video>
+                <h3 style="font-size:16px;">📷 Optical Inspection (Vision)</h3>
+                <video class="camera-video" id="cameraVideo" autoplay playsinline muted></video>
                 <canvas id="cameraCanvas" style="display:none;"></canvas>
                 <div class="camera-ctrls">
-                    <button class="new-chat-btn" onclick="captureSnapshot()">📸 Capture</button>
-                    <label class="new-chat-btn" style="cursor:pointer;">
-                        📁 Upload Photo
+                    <button class="new-chat-btn" style="background:var(--primary); color:#000;" onclick="captureSnapshot()">📸 Capture</button>
+                    <label class="new-chat-btn" style="cursor:pointer; background:rgba(255,255,255,0.08); color:#fff;">
+                        📁 Upload
                         <input type="file" id="fileUploadInput" accept="image/*" style="display:none;" onchange="handleFileUpload(event)">
                     </label>
-                    <button class="new-chat-btn" style="background:#ef4444; color:#fff;" onclick="closeCamera()">✕ Close</button>
+                    <button class="new-chat-btn" style="background:#ef4444; color:#fff;" onclick="closeCamera()">✕ Cancel</button>
                 </div>
             </div>
         </div>
 
-        <!-- RELIABLE SIGN IN / SIGN UP MODAL -->
+        <!-- Authentication -->
         <div class="auth-overlay" id="authModal">
             <div class="auth-card">
-                <h2 id="authHeading">Sign In to Lemon AI</h2>
-                <p id="authSub">Enter your username and password to access your persistent chats.</p>
+                <h2 id="authHeading">Access Lemon AI</h2>
+                <p id="authSub">Sign in or create account to preserve isolated cognitive sessions.</p>
                 <div class="auth-error" id="authErrorMsg"></div>
                 <input type="text" id="authUsername" class="auth-input" placeholder="Username" autocomplete="off" />
                 <input type="password" id="authPassword" class="auth-input" placeholder="Password" />
-                <button class="auth-btn" id="authSubmitBtn" onclick="handleAuthSubmit()">Sign In</button>
+                <button class="auth-btn" id="authSubmitBtn" onclick="handleAuthSubmit()">Enter System</button>
                 <div class="auth-switch" onclick="toggleAuthMode()">
-                    <span id="authToggleText">Don't have an account? Create one</span>
+                    <span id="authToggleText">No account? Create one</span>
                 </div>
             </div>
         </div>
 
         <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
 
+        <!-- Sidebar with Dedicated Chambers -->
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-header">
                 <div>
-                    <h3 style="font-size:16px;">Lemon Cores</h3>
+                    <h3 style="font-size:16px;">Cognitive Chambers</h3>
                     <div style="font-size:11px; color:#94a3b8;">Created by <b style="color:#facc15;">Utkarsh Bandhu</b></div>
                 </div>
                 <button class="sidebar-close" onclick="closeSidebar()">✕</button>
             </div>
 
-            <button class="new-chat-btn" style="width:100%; justify-content:center; margin-bottom:12px;" onclick="startNewChat()">
-                <span>＋</span> Start New Chat
-            </button>
-
-            <div class="sidebar-section-title">Cognitive & Warrior Cores</div>
+            <div class="sidebar-section-title">Launch Specific Core Session</div>
             <div class="core-btn-grid">
-                <button class="core-choice rage-choice selected" id="core-rage" onclick="selectCore('rage')">🔥 Rage</button>
-                <button class="core-choice" id="core-study" onclick="selectCore('study')">📚 Study</button>
-                <button class="core-choice" id="core-solver" onclick="selectCore('solver')">🧠 Solver</button>
-                <button class="core-choice" id="core-hybrid" onclick="selectCore('hybrid')">🌟 Hybrid</button>
-                <button class="core-choice" id="core-strategy" onclick="selectCore('strategy')">🛡️ Strategy</button>
-                <button class="core-choice" id="core-philosophy" onclick="selectCore('philosophy')">🌌 Philosophy</button>
-                <button class="core-choice" id="core-emotional" onclick="selectCore('emotional')">💖 Emotional</button>
-                <button class="core-choice" id="core-intellect" onclick="selectCore('intellect')">⚡ Intellect</button>
-                <button class="core-choice" id="core-creative" onclick="selectCore('creative')">🎨 Creative</button>
-                <button class="core-choice" id="core-zen" onclick="selectCore('zen')">🌿 Zen</button>
+                <button class="core-choice" id="core-intellect" onclick="switchDedicatedChamber('intellect')">⚡ Intellect</button>
+                <button class="core-choice" id="core-rage" onclick="switchDedicatedChamber('rage')">🔥 Rage</button>
+                <button class="core-choice" id="core-solver" onclick="switchDedicatedChamber('solver')">🧠 Solver</button>
+                <button class="core-choice" id="core-study" onclick="switchDedicatedChamber('study')">📚 Study</button>
+                <button class="core-choice" id="core-philosophy" onclick="switchDedicatedChamber('philosophy')">🌌 Philosophy</button>
+                <button class="core-choice" id="core-strategy" onclick="switchDedicatedChamber('strategy')">🛡️ Strategy</button>
+                <button class="core-choice" id="core-creative" onclick="switchDedicatedChamber('creative')">🎨 Creative</button>
+                <button class="core-choice" id="core-emotional" onclick="switchDedicatedChamber('emotional')">💖 Emotional</button>
+                <button class="core-choice" id="core-zen" onclick="switchDedicatedChamber('zen')">🌿 Zen</button>
+                <button class="core-choice" id="core-hybrid" onclick="switchDedicatedChamber('hybrid')">🌟 Hybrid</button>
             </div>
 
-            <div class="sidebar-section-title">Saved Chats (Never Wipes)</div>
+            <div class="sidebar-section-title">Saved Discussions</div>
             <div class="sessions-list" id="sessionsList"></div>
 
             <div style="margin-top:auto; padding-top:14px; border-top:1px solid var(--card-border);">
-                <div style="font-size:12px; color:#94a3b8; margin-bottom:6px;">Signed in as: <b id="sidebarUsername" style="color:#fff;">Guest</b></div>
-                <button class="new-chat-btn" style="width:100%; justify-content:center; color:#f87171; border-color:rgba(248,113,113,0.3); background:none;" onclick="logout()">Logout</button>
+                <div style="font-size:12px; color:#94a3b8; margin-bottom:6px;">Signed in: <b id="sidebarUsername" style="color:#fff;">Guest</b></div>
+                <button class="new-chat-btn" style="width:100%; justify-content:center; color:#f87171; border-color:rgba(248,113,113,0.3); background:none;" onclick="logout()">Terminate Session</button>
             </div>
         </aside>
 
+        <!-- Main Header -->
         <header class="header">
             <div class="header-left">
-                <button class="menu-trigger" onclick="openSidebar()" title="Conversations & Cores">☰</button>
+                <button class="menu-trigger" onclick="openSidebar()" title="Chambers & History">☰</button>
                 <div class="brand-badge">🍋</div>
                 <div>
                     <div class="brand-title">Lemon AI</div>
-                    <div class="creator-tag">Made by <b>Utkarsh Bandhu</b></div>
+                    <div class="creator-tag">Engineered by <b>Utkarsh Bandhu</b></div>
                 </div>
             </div>
-            <button class="new-chat-btn" onclick="startNewChat()">＋ New Chat</button>
+            <div class="current-chamber-pill" id="currentChamberBadge">⚡ INTELLECT</div>
         </header>
 
+        <!-- Chat Stream -->
         <main class="chat-container" id="chatStream">
             <div class="hero-greeting" id="heroGreeting">
                 <div class="hero-logo">🍋</div>
-                <div class="hero-title" id="heroGreetingName">Enter The Arena</div>
-                <div class="hero-sub">Upload a photo of your homework, code, or math. Lemon will detect errors and speak out the exact correction.</div>
+                <div class="hero-title" id="heroGreetingName">Intellect Awaiting Inquiry</div>
+                <div class="hero-sub" id="heroGreetingSub">Pure cognitive architecture. Select any chamber from the menu to activate dedicated first-principles reasoning.</div>
                 <div class="hero-badge">
                     <span>⚡</span> Architected by Utkarsh Bandhu
-                </div>
-
-                <div class="starter-cards">
-                    <div class="starter-card rage-card" onclick="openCamera()">
-                        <div class="starter-card-title">📷 Scan & Fix Mistakes</div>
-                        <div class="starter-card-desc">Click to snap photo or upload image file</div>
-                    </div>
-                    <div class="starter-card" onclick="runStarterPrompt('Feynman technique se mujhe thermodynamics ka Second Law step-by-step samjha do.')">
-                        <div class="starter-card-title">📚 Study Mentor</div>
-                        <div class="starter-card-desc">Intuitive analogies & exam notes</div>
-                    </div>
-                    <div class="starter-card" onclick="runStarterPrompt('Rage mode, mujhe lagta hai main procrastinate kar raha hoon. Mujhe reality check do.')">
-                        <div class="starter-card-title">🔥 Rage Focus</div>
-                        <div class="starter-card-desc">Zero excuses, unyielding discipline</div>
-                    </div>
-                    <div class="starter-card" onclick="runStarterPrompt('Break down the mathematics of gradient descent and cost functions.')">
-                        <div class="starter-card-title">🧠 Complex Problem</div>
-                        <div class="starter-card-desc">First-principles deep dive</div>
-                    </div>
                 </div>
             </div>
         </main>
 
+        <!-- Bottom Input Bar -->
         <footer class="bottom-dock">
             <div class="img-preview-bar" id="imgPreviewBar">
                 <img id="imgPreviewThumb" src="" alt="preview">
-                <span>Photo Ready (Vision Precision Active)</span>
+                <span>Visual Artifact Loaded (Inspection Mode)</span>
                 <span class="img-remove-btn" onclick="clearAttachedImage()">✕</span>
             </div>
 
-            <div class="dock-status" id="dockStatus">● Ready in Rage Mode</div>
+            <div class="dock-status" id="dockStatus">● Chamber Ready</div>
             <div class="input-dock">
-                <button class="dock-btn cam-btn" onclick="openCamera()" title="Camera / Scan Photo">📷</button>
-                <input type="text" id="textInput" placeholder="Pose question or attach photo with 📷..." onkeydown="if(event.key==='Enter') sendTextQuery()" />
-                <button class="dock-btn mic-btn" id="micBtn" onclick="toggleVoice()" title="Record Voice">🎙️</button>
+                <button class="dock-btn cam-btn" onclick="requestCameraAccess()" title="Request Camera / Attach Visual">📷</button>
+                <input type="text" id="textInput" placeholder="Pose an inquiry or upload artifact with 📷..." onkeydown="if(event.key==='Enter') sendTextQuery()" />
+                <button class="dock-btn mic-btn" id="micBtn" onclick="requestMicAndRecord()" title="Microphone Access">🎙️</button>
                 <button class="dock-btn send-btn" onclick="sendTextQuery()" title="Send">➤</button>
             </div>
         </footer>
@@ -937,9 +905,9 @@ async def serve_app():
 
         <script>
             let currentUserId = localStorage.getItem("lemon_user_id");
-            let currentUsername = localStorage.getItem("lemon_username") || "Guest";
+            let currentUsername = localStorage.getItem("lemon_username") || "Thinker";
             let currentSessionId = parseInt(localStorage.getItem("lemon_current_session_id") || "0");
-            let activeCore = localStorage.getItem("lemon_active_core") || "rage";
+            let currentCoreMode = localStorage.getItem("lemon_active_core") || "intellect";
             let isAuthRegister = false;
             let isRecording = false;
             let mediaRecorder = null;
@@ -967,6 +935,8 @@ async def serve_app():
             const sessionsList = document.getElementById("sessionsList");
             const heroGreeting = document.getElementById("heroGreeting");
             const heroGreetingName = document.getElementById("heroGreetingName");
+            const heroGreetingSub = document.getElementById("heroGreetingSub");
+            const currentChamberBadge = document.getElementById("currentChamberBadge");
 
             const cameraModal = document.getElementById("cameraModal");
             const cameraVideo = document.getElementById("cameraVideo");
@@ -974,170 +944,37 @@ async def serve_app():
             const imgPreviewBar = document.getElementById("imgPreviewBar");
             const imgPreviewThumb = document.getElementById("imgPreviewThumb");
 
-            /* --- RELIABLE AUTH CONTROLS --- */
-            function checkAuth() {
-                selectCore(activeCore);
-                if (currentUserId && currentUserId !== "null" && currentUserId !== "undefined") {
-                    authModal.style.display = "none";
-                    sidebarUsername.innerText = currentUsername;
-                    const formattedName = currentUsername.charAt(0).toUpperCase() + currentUsername.slice(1);
-                    heroGreetingName.innerText = `Welcome, ${formattedName}!`;
-                    initIndexedDB().then(() => initHistory());
-                } else {
-                    authModal.style.display = "flex";
-                }
-            }
-
-            function toggleAuthMode() {
-                isAuthRegister = !isAuthRegister;
-                authErrorMsg.style.display = "none";
-                if (isAuthRegister) {
-                    authHeading.innerText = "Create Lemon Account";
-                    authSub.innerText = "Pick a username and password to save your chats permanently.";
-                    authSubmitBtn.innerText = "Create Account";
-                    authToggleText.innerText = "Already have an account? Sign In";
-                } else {
-                    authHeading.innerText = "Sign In to Lemon AI";
-                    authSub.innerText = "Enter your username and password to access your persistent chats.";
-                    authSubmitBtn.innerText = "Sign In";
-                    authToggleText.innerText = "Don't have an account? Create one";
-                }
-            }
-
-            async function handleAuthSubmit() {
-                const u = document.getElementById("authUsername").value.trim();
-                const p = document.getElementById("authPassword").value.trim();
-                
-                authErrorMsg.style.display = "none";
-                if (!u || !p) {
-                    authErrorMsg.innerText = "Please enter both username and password.";
-                    authErrorMsg.style.display = "block";
-                    return;
-                }
-
-                const endpoint = isAuthRegister ? "/api/register" : "/api/login";
-                const fd = new FormData();
-                fd.append("username", u);
-                fd.append("password", p);
-
-                authSubmitBtn.innerText = "Connecting...";
-                try {
-                    const res = await fetch(endpoint, { method: "POST", body: fd });
-                    const data = await res.json();
-                    authSubmitBtn.innerText = isAuthRegister ? "Create Account" : "Sign In";
-
-                    if (res.ok && data.status === "ok") {
-                        currentUserId = data.user_id.toString();
-                        currentUsername = data.username;
-                        localStorage.setItem("lemon_user_id", currentUserId);
-                        localStorage.setItem("lemon_username", currentUsername);
-                        authModal.style.display = "none";
-                        checkAuth();
-                    } else if (res.status === 404 && !isAuthRegister) {
-                        // User does not exist, switch to register mode automatically
-                        toggleAuthMode();
-                        authErrorMsg.innerText = "Account not found. Click 'Create Account' below to sign up.";
-                        authErrorMsg.style.display = "block";
-                    } else {
-                        authErrorMsg.innerText = data.message || "Authentication failed. Try again.";
-                        authErrorMsg.style.display = "block";
-                    }
-                } catch(err) {
-                    console.error("Auth fetch error:", err);
-                    authSubmitBtn.innerText = isAuthRegister ? "Create Account" : "Sign In";
-                    authErrorMsg.innerText = "Could not reach server. Please try again.";
-                    authErrorMsg.style.display = "block";
-                }
-            }
-
-            function logout() {
-                localStorage.removeItem("lemon_user_id");
-                localStorage.removeItem("lemon_username");
-                localStorage.removeItem("lemon_current_session_id");
-                currentUserId = null;
-                currentUsername = "Guest";
-                currentSessionId = 0;
-                chatStream.innerHTML = "";
-                closeSidebar();
-                checkAuth();
-            }
-
-            /* --- SAFE INDEXEDDB INITIALIZATION (NO VERSION CRASHES) --- */
-            let idb = null;
-            function initIndexedDB() {
-                return new Promise((resolve) => {
-                    try {
-                        const req = indexedDB.open("LemonPermanentDB");
-                        req.onupgradeneeded = (e) => {
-                            const db = e.target.result;
-                            if (!db.objectStoreNames.contains("sessions")) {
-                                db.createObjectStore("sessions", { keyPath: "id" });
-                            }
-                        };
-                        req.onsuccess = (e) => {
-                            idb = e.target.result;
-                            resolve(idb);
-                        };
-                        req.onerror = () => resolve(null);
-                    } catch(e) {
-                        resolve(null);
-                    }
-                });
-            }
-
-            async function saveSessionToIDB(sessionObj) {
-                if (!idb) await initIndexedDB();
-                if (!idb) return;
-                try {
-                    const tx = idb.transaction("sessions", "readwrite");
-                    tx.objectStore("sessions").put(sessionObj);
-                } catch(e) {}
-            }
-
-            async function getAllSessionsFromIDB(userId) {
-                if (!idb) await initIndexedDB();
-                if (!idb) return [];
-                return new Promise((resolve) => {
-                    try {
-                        const tx = idb.transaction("sessions", "readonly");
-                        const store = tx.objectStore("sessions");
-                        const req = store.getAll();
-                        req.onsuccess = () => {
-                            const results = (req.result || []).filter(s => s.user_id === userId);
-                            resolve(results);
-                        };
-                        req.onerror = () => resolve([]);
-                    } catch(e) {
-                        resolve([]);
-                    }
-                });
-            }
-
-            async function deleteSessionFromIDB(sessionId) {
-                if (!idb) await initIndexedDB();
-                if (!idb) return;
-                try {
-                    const tx = idb.transaction("sessions", "readwrite");
-                    tx.objectStore("sessions").delete(sessionId);
-                } catch(e) {}
-            }
-
-            /* --- CAMERA MECHANISM --- */
-            async function openCamera() {
+            /* ============================================================
+               1. NATIVE HARDWARE PERMISSION REQUEST ENGINE (MIC & CAMERA)
+               ============================================================ */
+            async function requestCameraAccess() {
+                dockStatus.innerText = "● Requesting optical camera authorization...";
                 cameraModal.style.display = "flex";
-                try {
-                    cameraStream = await navigator.mediaDevices.getUserMedia({
-                        video: { facingMode: { ideal: "environment" } }
-                    });
-                    cameraVideo.srcObject = cameraStream;
-                } catch(e) {
+                
+                // Explicitly prompt device for video permission
+                const constraintsList = [
+                    { video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 } } },
+                    { video: { facingMode: "user" } },
+                    { video: true }
+                ];
+
+                let streamAcquired = false;
+                for (const c of constraintsList) {
                     try {
-                        cameraStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                        cameraStream = await navigator.mediaDevices.getUserMedia(c);
                         cameraVideo.srcObject = cameraStream;
-                    } catch(err) {
-                        closeCamera();
-                        document.getElementById("fileUploadInput").click();
+                        streamAcquired = true;
+                        dockStatus.innerText = "● Camera verified & active.";
+                        break;
+                    } catch (err) {
+                        console.warn("Retrying optical constraint...", err);
                     }
+                }
+
+                if (!streamAcquired) {
+                    alert("Camera authorization was declined or hardware was not found. You can upload an image file directly.");
+                    closeCamera();
+                    document.getElementById("fileUploadInput").click();
                 }
             }
 
@@ -1147,6 +984,7 @@ async def serve_app():
                     cameraStream = null;
                 }
                 cameraModal.style.display = "none";
+                dockStatus.innerText = "● Ready";
             }
 
             function resizeImage(source, maxWidth = 1024, maxHeight = 1024, quality = 0.8) {
@@ -1205,13 +1043,225 @@ async def serve_app():
                 attachedImageBase64 = b64;
                 imgPreviewThumb.src = b64;
                 imgPreviewBar.style.display = "flex";
-                dockStatus.innerText = "● Photo ready. Lemon Vision will detect and correct errors.";
+                dockStatus.innerText = "● Visual artifact attached. Ready for multi-modal analysis.";
             }
 
             function clearAttachedImage() {
                 attachedImageBase64 = null;
                 imgPreviewBar.style.display = "none";
-                dockStatus.innerText = "● Ready in " + activeCore.toUpperCase() + " Mode";
+                dockStatus.innerText = "● Ready";
+            }
+
+            async function requestMicAndRecord() {
+                if (!isRecording) {
+                    dockStatus.innerText = "● Requesting microphone authorization...";
+                    try {
+                        // Explicit browser permission request
+                        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                        mediaRecorder = new MediaRecorder(stream);
+                        audioChunks = [];
+
+                        mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
+                        mediaRecorder.onstop = async () => {
+                            const blob = new Blob(audioChunks, { type: 'audio/wav' });
+                            setThinking(true, "Transcribing voice articulation...");
+                            uploadVoice(blob);
+                            stream.getTracks().forEach(t => t.stop());
+                        };
+
+                        mediaRecorder.start();
+                        isRecording = true;
+                        micBtn.classList.add("active-record");
+                        dockStatus.innerText = "🔴 Listening... Tap microphone icon again to transmit.";
+                    } catch (err) {
+                        console.error("Mic permission error:", err);
+                        alert("Microphone permission was denied. Please allow microphone access in your browser site settings.");
+                        dockStatus.innerText = "● Mic access denied.";
+                    }
+                } else {
+                    isRecording = false;
+                    micBtn.classList.remove("active-record");
+                    setThinking(true, "Processing synthesized voice input...");
+                    if (mediaRecorder) mediaRecorder.stop();
+                }
+            }
+
+            /* ============================================================
+               2. DEDICATED ISOLATED COGNITIVE CHAMBERS
+               ============================================================ */
+            async function switchDedicatedChamber(mode) {
+                currentCoreMode = mode;
+                localStorage.setItem("lemon_active_core", mode);
+                updateChamberUI();
+
+                // Open dedicated session for this specific core
+                if (currentUserId) {
+                    const fd = new FormData();
+                    fd.append("user_id", currentUserId);
+                    fd.append("core_mode", mode);
+                    try {
+                        const res = await fetch("/api/new-core-session", { method: "POST", body: fd });
+                        const data = await res.json();
+                        currentSessionId = data.session_id;
+                        localStorage.setItem("lemon_current_session_id", currentSessionId.toString());
+                        
+                        chatStream.innerHTML = "";
+                        heroGreeting.style.display = "flex";
+                        heroGreetingName.innerText = `${mode.toUpperCase()} Chamber Activated`;
+                        heroGreetingSub.innerText = `Dedicated cognitive isolation mode: ${mode.toUpperCase()}. Previous core contexts will not bleed into this session.`;
+                        closeSidebar();
+                        loadSessionsList();
+                        dockStatus.innerText = `● Session bound strictly to ${mode.toUpperCase()}`;
+                    } catch(e) {
+                        console.error("Session creation error:", e);
+                    }
+                }
+            }
+
+            function updateChamberUI() {
+                document.querySelectorAll(".core-choice").forEach(b => b.classList.remove("selected"));
+                const target = document.getElementById(`core-${currentCoreMode}`);
+                if (target) target.classList.add("selected");
+                currentChamberBadge.innerText = `⚡ ${currentCoreMode.toUpperCase()}`;
+            }
+
+            /* ============================================================
+               3. BULLETPROOF PERSISTENCE & AUTH
+               ============================================================ */
+            function checkAuth() {
+                updateChamberUI();
+                if (currentUserId && currentUserId !== "null" && currentUserId !== "undefined") {
+                    authModal.style.display = "none";
+                    sidebarUsername.innerText = currentUsername;
+                    heroGreetingName.innerText = `Welcome, ${currentUsername}!`;
+                    initIndexedDB().then(() => initHistory());
+                } else {
+                    authModal.style.display = "flex";
+                }
+            }
+
+            function toggleAuthMode() {
+                isAuthRegister = !isAuthRegister;
+                authErrorMsg.style.display = "none";
+                if (isAuthRegister) {
+                    authHeading.innerText = "Create Identity";
+                    authSub.innerText = "Register to preserve dedicated chambers permanently.";
+                    authSubmitBtn.innerText = "Create Account";
+                    authToggleText.innerText = "Already registered? Sign In";
+                } else {
+                    authHeading.innerText = "Access Lemon AI";
+                    authSub.innerText = "Sign in to access your persistent cognitive sessions.";
+                    authSubmitBtn.innerText = "Enter System";
+                    authToggleText.innerText = "No account? Create one";
+                }
+            }
+
+            async function handleAuthSubmit() {
+                const u = document.getElementById("authUsername").value.trim();
+                const p = document.getElementById("authPassword").value.trim();
+                
+                authErrorMsg.style.display = "none";
+                if (!u || !p) {
+                    authErrorMsg.innerText = "Username and password required.";
+                    authErrorMsg.style.display = "block";
+                    return;
+                }
+
+                const endpoint = isAuthRegister ? "/api/register" : "/api/login";
+                const fd = new FormData();
+                fd.append("username", u);
+                fd.append("password", p);
+
+                authSubmitBtn.innerText = "Synchronizing...";
+                try {
+                    const res = await fetch(endpoint, { method: "POST", body: fd });
+                    const data = await res.json();
+                    authSubmitBtn.innerText = isAuthRegister ? "Create Account" : "Enter System";
+
+                    if (res.ok && data.status === "ok") {
+                        currentUserId = data.user_id.toString();
+                        currentUsername = data.username;
+                        localStorage.setItem("lemon_user_id", currentUserId);
+                        localStorage.setItem("lemon_username", currentUsername);
+                        authModal.style.display = "none";
+                        checkAuth();
+                    } else if (res.status === 404 && !isAuthRegister) {
+                        toggleAuthMode();
+                        authErrorMsg.innerText = "User not found. Click 'Create Account' below to register.";
+                        authErrorMsg.style.display = "block";
+                    } else {
+                        authErrorMsg.innerText = data.message || "Authentication error.";
+                        authErrorMsg.style.display = "block";
+                    }
+                } catch(err) {
+                    authSubmitBtn.innerText = isAuthRegister ? "Create Account" : "Enter System";
+                    authErrorMsg.innerText = "Server reachability issue.";
+                    authErrorMsg.style.display = "block";
+                }
+            }
+
+            function logout() {
+                localStorage.removeItem("lemon_user_id");
+                localStorage.removeItem("lemon_username");
+                localStorage.removeItem("lemon_current_session_id");
+                currentUserId = null;
+                currentUsername = "Thinker";
+                currentSessionId = 0;
+                chatStream.innerHTML = "";
+                closeSidebar();
+                checkAuth();
+            }
+
+            let idb = null;
+            function initIndexedDB() {
+                return new Promise((resolve) => {
+                    try {
+                        const req = indexedDB.open("LemonPermanentDB");
+                        req.onupgradeneeded = (e) => {
+                            const db = e.target.result;
+                            if (!db.objectStoreNames.contains("sessions")) {
+                                db.createObjectStore("sessions", { keyPath: "id" });
+                            }
+                        };
+                        req.onsuccess = (e) => { idb = e.target.result; resolve(idb); };
+                        req.onerror = () => resolve(null);
+                    } catch(e) { resolve(null); }
+                });
+            }
+
+            async function saveSessionToIDB(sessionObj) {
+                if (!idb) await initIndexedDB();
+                if (!idb) return;
+                try {
+                    const tx = idb.transaction("sessions", "readwrite");
+                    tx.objectStore("sessions").put(sessionObj);
+                } catch(e) {}
+            }
+
+            async function getAllSessionsFromIDB(userId) {
+                if (!idb) await initIndexedDB();
+                if (!idb) return [];
+                return new Promise((resolve) => {
+                    try {
+                        const tx = idb.transaction("sessions", "readonly");
+                        const store = tx.objectStore("sessions");
+                        const req = store.getAll();
+                        req.onsuccess = () => {
+                            const results = (req.result || []).filter(s => s.user_id === userId);
+                            resolve(results);
+                        };
+                        req.onerror = () => resolve([]);
+                    } catch(e) { resolve([]); }
+                });
+            }
+
+            async function deleteSessionFromIDB(sessionId) {
+                if (!idb) await initIndexedDB();
+                if (!idb) return;
+                try {
+                    const tx = idb.transaction("sessions", "readwrite");
+                    tx.objectStore("sessions").delete(sessionId);
+                } catch(e) {}
             }
 
             function openSidebar() {
@@ -1222,15 +1272,6 @@ async def serve_app():
             function closeSidebar() {
                 sidebar.classList.remove("open");
                 sidebarOverlay.classList.remove("open");
-            }
-
-            function selectCore(core) {
-                activeCore = core;
-                localStorage.setItem("lemon_active_core", core);
-                document.querySelectorAll(".core-choice").forEach(b => b.classList.remove("selected"));
-                const target = document.getElementById(`core-${core}`);
-                if (target) target.classList.add("selected");
-                dockStatus.innerText = `● Switched to ${core.toUpperCase()} core`;
             }
 
             async function initHistory() {
@@ -1254,16 +1295,12 @@ async def serve_app():
                         await openSession(currentSessionId);
                     } else if (data.sessions && data.sessions.length > 0) {
                         await openSession(data.sessions[0].id);
-                    } else if (localIDBSessions.length > 0) {
-                        openLocalIDBSession(localIDBSessions[0]);
                     } else {
-                        startNewChat();
+                        switchDedicatedChamber(currentCoreMode);
                     }
                 } catch(e) {
                     const localIDBSessions = await getAllSessionsFromIDB(currentUserId);
-                    if (localIDBSessions.length > 0) {
-                        openLocalIDBSession(localIDBSessions[0]);
-                    }
+                    if (localIDBSessions.length > 0) openLocalIDBSession(localIDBSessions[0]);
                 }
             }
 
@@ -1275,9 +1312,7 @@ async def serve_app():
                     sessionsList.innerHTML = "";
 
                     let list = data.sessions || [];
-                    if (list.length === 0) {
-                        list = await getAllSessionsFromIDB(currentUserId);
-                    }
+                    if (list.length === 0) list = await getAllSessionsFromIDB(currentUserId);
 
                     if (list.length > 0) {
                         list.forEach(s => {
@@ -1290,21 +1325,11 @@ async def serve_app():
                             sessionsList.appendChild(item);
                         });
                     } else {
-                        sessionsList.innerHTML = `<div style="font-size:12px; color:#64748b; padding:10px;">No saved chats yet.</div>`;
+                        sessionsList.innerHTML = `<div style="font-size:12px; color:#64748b; padding:10px;">No preserved sessions.</div>`;
                     }
                 } catch(e) {
-                    console.log("Sessions error:", e);
+                    console.log("Sessions loading error:", e);
                 }
-            }
-
-            function startNewChat() {
-                currentSessionId = 0;
-                localStorage.setItem("lemon_current_session_id", "0");
-                chatStream.innerHTML = "";
-                chatStream.appendChild(heroGreeting);
-                heroGreeting.style.display = "flex";
-                closeSidebar();
-                dockStatus.innerText = "● Ready in " + activeCore.toUpperCase() + " Mode";
             }
 
             async function openSession(id) {
@@ -1319,6 +1344,13 @@ async def serve_app():
                     const data = await res.json();
                     if (data.messages && data.messages.length > 0) {
                         data.messages.forEach(m => appendMessage(m.role === "assistant" ? "lemon" : "user", m.content, m.emotion, m.image_data));
+                        // Update UI to reflect session's mode
+                        const lastMsg = data.messages[data.messages.length - 1];
+                        if (lastMsg && lastMsg.mode) {
+                            currentCoreMode = lastMsg.mode;
+                            localStorage.setItem("lemon_active_core", currentCoreMode);
+                            updateChamberUI();
+                        }
                     } else {
                         const localSessions = await getAllSessionsFromIDB(currentUserId);
                         const match = localSessions.find(s => s.id === id);
@@ -1342,22 +1374,17 @@ async def serve_app():
 
             async function deleteSession(e, id) {
                 e.stopPropagation();
-                if (!confirm("Delete this conversation?")) return;
+                if (!confirm("Permanently purge this discussion chamber?")) return;
                 const fd = new FormData();
                 fd.append("session_id", id);
                 await fetch("/api/delete-session", { method: "POST", body: fd });
                 await deleteSessionFromIDB(id);
 
-                if (currentSessionId === id) startNewChat();
+                if (currentSessionId === id) switchDedicatedChamber(currentCoreMode);
                 loadSessionsList();
             }
 
-            function runStarterPrompt(prompt) {
-                textInput.value = prompt;
-                sendTextQuery();
-            }
-
-            function setThinking(active, label = "Scanning and inspecting errors...") {
+            function setThinking(active, label = "Executing first-principles synthesis...") {
                 if (active) {
                     dockStatus.innerText = `⚡ ${label}`;
                     if (!currentThinkingEl) {
@@ -1366,7 +1393,7 @@ async def serve_app():
                         currentThinkingEl.innerHTML = `
                             <div class="thinking-box">
                                 <div class="tdot"></div><div class="tdot"></div><div class="tdot"></div>
-                                <span style="font-size:12px; color:#facc15; margin-left:4px;">Analyzing precision...</span>
+                                <span style="font-size:12px; color:#facc15; margin-left:4px;">Synthesizing...</span>
                             </div>
                         `;
                         chatStream.appendChild(currentThinkingEl);
@@ -1377,12 +1404,12 @@ async def serve_app():
                         currentThinkingEl.remove();
                         currentThinkingEl = null;
                     }
-                    dockStatus.innerText = "● Ready in " + activeCore.toUpperCase() + " Mode";
+                    dockStatus.innerText = "● Chamber Active";
                 }
             }
 
             async function playSpecificMessage(text) {
-                dockStatus.innerText = "🔊 Synthesizing speech...";
+                dockStatus.innerText = "🔊 Vocalizing...";
                 const fd = new FormData();
                 fd.append("text", text);
                 try {
@@ -1393,7 +1420,7 @@ async def serve_app():
                         audioElement.play();
                     }
                 } catch(e) {
-                    dockStatus.innerText = "Voice error.";
+                    dockStatus.innerText = "Audio playback fault.";
                 }
             }
 
@@ -1412,25 +1439,23 @@ async def serve_app():
                 group.className = `bubble-group ${sender}`;
 
                 let html = "";
-                let imgTag = imageData ? `<img src="${imageData}" class="chat-img-thumb" alt="analyzed image">` : "";
+                let imgTag = imageData ? `<img src="${imageData}" class="chat-img-thumb" alt="analyzed visual artifact">` : "";
 
                 if (sender === "lemon") {
-                    const isRage = (emotion === "Fierce" || activeCore === "rage");
-                    const emoClass = isRage ? "feeling-tag rage-tag" : "feeling-tag";
-                    const tag = emotion ? `<span class="${emoClass}">${emotion}</span><br>` : "";
+                    const tag = emotion ? `<span class="feeling-tag">${emotion}</span><br>` : "";
                     const safeRaw = encodeURIComponent(text);
                     const formattedContent = marked.parse(text);
 
                     html = `
                         <div class="bubble-meta">
-                            <span>Lemon</span>
+                            <span>Lemon (${currentCoreMode.toUpperCase()})</span>
                         </div>
                         <div class="bubble lemon">
                             ${tag}
                             ${imgTag}
                             <div>${formattedContent}</div>
                             <div class="message-actions">
-                                <button class="msg-action-btn" onclick="playSpecificMessage(decodeURIComponent('${safeRaw}'))">🔊 Play Voice</button>
+                                <button class="msg-action-btn" onclick="playSpecificMessage(decodeURIComponent('${safeRaw}'))">🔊 Vocalize</button>
                                 <button class="msg-action-btn" onclick="copyMessage(decodeURIComponent('${safeRaw}'), this)">📋 Copy</button>
                             </div>
                         </div>
@@ -1449,9 +1474,6 @@ async def serve_app():
                 chatStream.scrollTop = chatStream.scrollHeight;
             }
 
-            audioElement.onplay = () => { dockStatus.innerText = "🔊 Lemon is speaking..."; };
-            audioElement.onended = () => { dockStatus.innerText = "● Ready in " + activeCore.toUpperCase() + " Mode"; };
-
             async function sendTextQuery() {
                 const text = textInput.value.trim();
                 const imageToSend = attachedImageBase64;
@@ -1459,17 +1481,15 @@ async def serve_app():
                 if (!text && !imageToSend) return;
 
                 textInput.value = "";
-                appendMessage("user", text ? text : "Scan this photo and pinpoint every error with the exact fix.", null, imageToSend);
-                setThinking(true, imageToSend ? "Vision Engine: Detecting mistakes..." : "Engaging " + activeCore.toUpperCase() + " focus...");
+                appendMessage("user", text ? text : "Examine this visual artifact and provide exhaustive intellectual audit.", null, imageToSend);
+                setThinking(true, imageToSend ? "Vision: Inspecting artifacts..." : `Engaging ${currentCoreMode.toUpperCase()} synthesis...`);
 
                 const fd = new FormData();
-                fd.append("text", text ? text : "Examine this image line-by-line. Spot all errors, calculations, or logic flaws, explain why, and write out the exact fix.");
+                fd.append("text", text ? text : "Perform rigorous diagnostic inspection of this image.");
                 fd.append("user_id", currentUserId.toString());
                 fd.append("session_id", (currentSessionId || 0).toString());
-                fd.append("mode", activeCore);
-                if (imageToSend) {
-                    fd.append("image_base64", imageToSend);
-                }
+                fd.append("mode", currentCoreMode);
+                if (imageToSend) fd.append("image_base64", imageToSend);
 
                 clearAttachedImage();
 
@@ -1483,52 +1503,22 @@ async def serve_app():
                     const existingSessions = await getAllSessionsFromIDB(currentUserId);
                     let curr = existingSessions.find(s => s.id === currentSessionId);
                     if (!curr) {
-                        curr = { id: currentSessionId, user_id: currentUserId, title: data.title, messages: [] };
+                        curr = { id: currentSessionId, user_id: currentUserId, title: data.title, core_mode: currentCoreMode, messages: [] };
                     }
-                    curr.messages.push({ role: "user", content: text, mode: activeCore, image_data: imageToSend });
-                    curr.messages.push({ role: "assistant", content: data.reply_text, mode: activeCore, emotion: data.emotion });
+                    curr.messages.push({ role: "user", content: text, mode: currentCoreMode, image_data: imageToSend });
+                    curr.messages.push({ role: "assistant", content: data.reply_text, mode: currentCoreMode, emotion: data.emotion });
                     await saveSessionToIDB(curr);
 
                     appendMessage("lemon", data.reply_text, data.emotion);
 
                     if (data.audio_base64) {
                         audioElement.src = data.audio_base64;
-                        audioElement.play().catch(e => console.log("Audio auto-play policy:", e));
+                        audioElement.play().catch(e => console.log("Audio autoplay prevented:", e));
                     }
                 } catch(e) {
-                    console.error("Text process error:", e);
+                    console.error("Transmission error:", e);
                     setThinking(false);
-                    dockStatus.innerText = "Connection error. Retrying...";
-                }
-            }
-
-            async function toggleVoice() {
-                if (!isRecording) {
-                    try {
-                        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                        mediaRecorder = new MediaRecorder(stream);
-                        audioChunks = [];
-
-                        mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
-                        mediaRecorder.onstop = async () => {
-                            const blob = new Blob(audioChunks, { type: 'audio/wav' });
-                            setThinking(true, "Transcribing voice words...");
-                            uploadVoice(blob);
-                            stream.getTracks().forEach(t => t.stop());
-                        };
-
-                        mediaRecorder.start();
-                        isRecording = true;
-                        micBtn.classList.add("active-record");
-                        dockStatus.innerText = "🔴 Listening... Tap mic again to send";
-                    } catch(err) {
-                        alert("Microphone permission required.");
-                    }
-                } else {
-                    isRecording = false;
-                    micBtn.classList.remove("active-record");
-                    setThinking(true, "Processing focus...");
-                    if (mediaRecorder) mediaRecorder.stop();
+                    dockStatus.innerText = "Network sync fault. Re-transmit.";
                 }
             }
 
@@ -1540,10 +1530,8 @@ async def serve_app():
                 fd.append("file", blob, "voice.wav");
                 fd.append("user_id", currentUserId.toString());
                 fd.append("session_id", (currentSessionId || 0).toString());
-                fd.append("mode", activeCore);
-                if (imageToSend) {
-                    fd.append("image_base64", imageToSend);
-                }
+                fd.append("mode", currentCoreMode);
+                if (imageToSend) fd.append("image_base64", imageToSend);
 
                 try {
                     const res = await fetch("/voice-process", { method: "POST", body: fd });
@@ -1552,33 +1540,30 @@ async def serve_app():
                     currentSessionId = data.session_id;
                     localStorage.setItem("lemon_current_session_id", currentSessionId.toString());
 
-                    if (data.user_text) {
-                        appendMessage("user", data.user_text, null, imageToSend);
-                    }
+                    if (data.user_text) appendMessage("user", data.user_text, null, imageToSend);
 
                     const existingSessions = await getAllSessionsFromIDB(currentUserId);
                     let curr = existingSessions.find(s => s.id === currentSessionId);
                     if (!curr) {
-                        curr = { id: currentSessionId, user_id: currentUserId, title: data.title, messages: [] };
+                        curr = { id: currentSessionId, user_id: currentUserId, title: data.title, core_mode: currentCoreMode, messages: [] };
                     }
-                    if (data.user_text) curr.messages.push({ role: "user", content: data.user_text, mode: activeCore, image_data: imageToSend });
-                    curr.messages.push({ role: "assistant", content: data.reply_text, mode: activeCore, emotion: data.emotion });
+                    if (data.user_text) curr.messages.push({ role: "user", content: data.user_text, mode: currentCoreMode, image_data: imageToSend });
+                    curr.messages.push({ role: "assistant", content: data.reply_text, mode: currentCoreMode, emotion: data.emotion });
                     await saveSessionToIDB(curr);
 
                     appendMessage("lemon", data.reply_text, data.emotion);
 
                     if (data.audio_base64) {
                         audioElement.src = data.audio_base64;
-                        audioElement.play().catch(e => console.log("Audio auto-play policy:", e));
+                        audioElement.play().catch(e => console.log("Audio autoplay prevented:", e));
                     }
                 } catch(e) {
-                    console.error("Voice process error:", e);
+                    console.error("Voice processing fault:", e);
                     setThinking(false);
-                    dockStatus.innerText = "Voice error. Try typing your message.";
+                    dockStatus.innerText = "Voice transmission fault.";
                 }
             }
 
-            // Clean startup check
             checkAuth();
         </script>
     </body>
