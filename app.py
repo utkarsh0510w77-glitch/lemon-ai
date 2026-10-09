@@ -18,7 +18,7 @@ PART2 = "b3FYnQHV93Lkgjmz4CtDJ1IpMfy4"
 GROQ_API_KEY = os.getenv("GROQ_API_KEY") or (PART1 + PART2)
 client = Groq(api_key=GROQ_API_KEY)
 
-app = FastAPI(title="Lemon AI - High-Precision Vision & Rage Core Edition")
+app = FastAPI(title="Lemon AI - Rock Solid Auth Edition")
 
 app.add_middleware(
     CORSMiddleware,
@@ -31,45 +31,47 @@ app.add_middleware(
 DB_PATH = "lemon_data.db"
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH, timeout=20)
+    conn = sqlite3.connect(DB_PATH, timeout=25)
     conn.execute("PRAGMA journal_mode=WAL;")
     return conn
 
 def init_db():
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS sessions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            title TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY(user_id) REFERENCES users(id)
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_id INTEGER NOT NULL,
-            role TEXT NOT NULL,
-            content TEXT NOT NULL,
-            mode TEXT NOT NULL,
-            emotion TEXT,
-            image_data TEXT,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY(session_id) REFERENCES sessions(id)
-        )
-    """)
-    conn.commit()
-    conn.close()
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                mode TEXT NOT NULL,
+                emotion TEXT,
+                image_data TEXT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(session_id) REFERENCES sessions(id)
+            )
+        """)
+        conn.commit()
+    finally:
+        conn.close()
 
 init_db()
 
@@ -174,7 +176,7 @@ def generate_ai_title(prompt: str) -> str:
 def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_base64: str = None) -> tuple[str, str]:
     instruction = PROMPT_MODES.get(mode, PROMPT_MODES["rage"]) + (
         "\nOUTPUT FORMAT: Line 1 MUST strictly be [EMOTION: <SingleWord>]. "
-        "Eligible tags: Fierce, Analytical, Insightful, Brilliant, Tender, Serene, Strategic. "
+        "Eligible: Fierce, Analytical, Insightful, Brilliant, Tender, Serene, Strategic. "
         "Followed directly by your comprehensive response."
     )
 
@@ -185,7 +187,6 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
         else:
             clean_image = f"data:image/jpeg;base64,{image_base64}"
 
-    # Multimodal Vision Pipeline
     if clean_image:
         vision_models = [
             "qwen/qwen3.8-27b",
@@ -224,9 +225,8 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
                 print(f"Vision model {vm} attempt failed: {e}")
                 continue
 
-        return "Image scan error. Please re-take or re-upload the photo cleanly so the vision engine can inspect it.", "Fierce"
+        return "Image scan error. Please re-take or re-upload the photo cleanly.", "Fierce"
 
-    # Text Reasoning Pipeline
     text_models = ["llama-3.1-8b-instant", "openai/gpt-oss-20b", "openai/gpt-oss-120b"]
     messages = [{"role": "system", "content": instruction}]
     for h in history[-8:]:
@@ -257,11 +257,12 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
 
     return "Observation complete. Restate your query so we can proceed.", "Serene"
 
+# ----------------- BULLETPROOF AUTH ENDPOINTS -----------------
 @app.post("/api/register")
 def register_user(username: str = Form(...), password: str = Form(...)):
     username = username.strip().lower()
-    if not username or len(password) < 4:
-        return JSONResponse({"status": "error", "message": "Username and password (min 4 chars) required."}, status_code=400)
+    if not username or len(password) < 3:
+        return JSONResponse({"status": "error", "message": "Username and password (min 3 chars) required."}, status_code=400)
 
     conn = get_db()
     cur = conn.cursor()
@@ -270,11 +271,13 @@ def register_user(username: str = Form(...), password: str = Form(...)):
         cur.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)", (username, pwd_hash))
         conn.commit()
         user_id = cur.lastrowid
-        conn.close()
         return JSONResponse({"status": "ok", "user_id": user_id, "username": username})
     except sqlite3.IntegrityError:
+        return JSONResponse({"status": "error", "message": "Username already exists. Please choose another or click Sign In."}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": f"Database error: {str(e)}"}, status_code=500)
+    finally:
         conn.close()
-        return JSONResponse({"status": "error", "message": "Username already taken."}, status_code=400)
 
 @app.post("/api/login")
 def login_user(username: str = Form(...), password: str = Form(...)):
@@ -283,35 +286,49 @@ def login_user(username: str = Form(...), password: str = Form(...)):
 
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT id, username FROM users WHERE username = ? AND password_hash = ?", (username, pwd_hash))
-    user = cur.fetchone()
-    conn.close()
-
-    if user:
-        return JSONResponse({"status": "ok", "user_id": user[0], "username": user[1]})
-    return JSONResponse({"status": "error", "message": "Invalid username or password."}, status_code=401)
+    try:
+        cur.execute("SELECT id, username FROM users WHERE username = ? AND password_hash = ?", (username, pwd_hash))
+        user = cur.fetchone()
+        if user:
+            return JSONResponse({"status": "ok", "user_id": user[0], "username": user[1]})
+        
+        # Check if username even exists
+        cur.execute("SELECT id FROM users WHERE username = ?", (username,))
+        exists = cur.fetchone()
+        if not exists:
+            return JSONResponse({"status": "not_found", "message": "Account not found. Switch to 'Create Account' below to sign up."}, status_code=404)
+        
+        return JSONResponse({"status": "error", "message": "Incorrect password. Please try again."}, status_code=401)
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": f"Server error: {str(e)}"}, status_code=500)
+    finally:
+        conn.close()
 
 @app.get("/api/sessions/{user_id}")
 def get_user_sessions(user_id: int):
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT id, title, created_at FROM sessions WHERE user_id = ? ORDER BY id DESC", (user_id,))
-    rows = cur.fetchall()
-    conn.close()
-    return JSONResponse({"sessions": [{"id": r[0], "title": r[1], "created_at": r[2]} for r in rows]})
+    try:
+        cur.execute("SELECT id, title, created_at FROM sessions WHERE user_id = ? ORDER BY id DESC", (user_id,))
+        rows = cur.fetchall()
+        return JSONResponse({"sessions": [{"id": r[0], "title": r[1], "created_at": r[2]} for r in rows]})
+    finally:
+        conn.close()
 
 @app.get("/api/session-messages/{session_id}")
 def get_session_messages(session_id: int):
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT role, content, mode, emotion, image_data, timestamp FROM messages WHERE session_id = ? ORDER BY id ASC", (session_id,))
-    rows = cur.fetchall()
-    conn.close()
-    messages = [
-        {"role": r[0], "content": r[1], "mode": r[2], "emotion": r[3], "image_data": r[4], "timestamp": r[5]}
-        for r in rows
-    ]
-    return JSONResponse({"messages": messages})
+    try:
+        cur.execute("SELECT role, content, mode, emotion, image_data, timestamp FROM messages WHERE session_id = ? ORDER BY id ASC", (session_id,))
+        rows = cur.fetchall()
+        messages = [
+            {"role": r[0], "content": r[1], "mode": r[2], "emotion": r[3], "image_data": r[4], "timestamp": r[5]}
+            for r in rows
+        ]
+        return JSONResponse({"messages": messages})
+    finally:
+        conn.close()
 
 @app.post("/api/restore-backup")
 def restore_backup(user_id: int = Form(...), sessions_json: str = Form(...)):
@@ -319,20 +336,22 @@ def restore_backup(user_id: int = Form(...), sessions_json: str = Form(...)):
         data = json.loads(sessions_json)
         conn = get_db()
         cur = conn.cursor()
-        for sess in data:
-            cur.execute("SELECT id FROM sessions WHERE user_id = ? AND title = ?", (user_id, sess.get("title", "Conversation")))
-            existing = cur.fetchone()
-            if not existing:
-                cur.execute("INSERT INTO sessions (user_id, title) VALUES (?, ?)", (user_id, sess.get("title", "Conversation")))
-                s_id = cur.lastrowid
-                for msg in sess.get("messages", []):
-                    cur.execute(
-                        "INSERT INTO messages (session_id, role, content, mode, emotion, image_data) VALUES (?, ?, ?, ?, ?, ?)",
-                        (s_id, msg.get("role", "user"), msg.get("content", ""), msg.get("mode", "rage"), msg.get("emotion"), msg.get("image_data"))
-                    )
-        conn.commit()
-        conn.close()
-        return JSONResponse({"status": "ok"})
+        try:
+            for sess in data:
+                cur.execute("SELECT id FROM sessions WHERE user_id = ? AND title = ?", (user_id, sess.get("title", "Conversation")))
+                existing = cur.fetchone()
+                if not existing:
+                    cur.execute("INSERT INTO sessions (user_id, title) VALUES (?, ?)", (user_id, sess.get("title", "Conversation")))
+                    s_id = cur.lastrowid
+                    for msg in sess.get("messages", []):
+                        cur.execute(
+                            "INSERT INTO messages (session_id, role, content, mode, emotion, image_data) VALUES (?, ?, ?, ?, ?, ?)",
+                            (s_id, msg.get("role", "user"), msg.get("content", ""), msg.get("mode", "rage"), msg.get("emotion"), msg.get("image_data"))
+                        )
+            conn.commit()
+            return JSONResponse({"status": "ok"})
+        finally:
+            conn.close()
     except Exception as e:
         return JSONResponse({"status": "error", "message": str(e)}, status_code=400)
 
@@ -340,11 +359,13 @@ def restore_backup(user_id: int = Form(...), sessions_json: str = Form(...)):
 def delete_session(session_id: int = Form(...)):
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
-    cur.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
-    conn.commit()
-    conn.close()
-    return JSONResponse({"status": "ok"})
+    try:
+        cur.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+        cur.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+        conn.commit()
+        return JSONResponse({"status": "ok"})
+    finally:
+        conn.close()
 
 def detect_tts_language(text: str) -> str:
     devanagari = re.search(r'[\u0900-\u097F]', text)
@@ -360,43 +381,44 @@ def handle_conversation(user_id: int, session_id: int, query: str, mode: str, im
     conn = get_db()
     cur = conn.cursor()
 
-    cur.execute("SELECT id FROM users WHERE id = ?", (user_id,))
-    if not cur.fetchone():
-        cur.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)", (f"user_{user_id}", "guest_pwd"))
-        conn.commit()
-        user_id = cur.lastrowid
+    try:
+        cur.execute("SELECT id FROM users WHERE id = ?", (user_id,))
+        if not cur.fetchone():
+            cur.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)", (f"user_{user_id}", "guest_pwd"))
+            conn.commit()
+            user_id = cur.lastrowid
 
-    if not session_id or session_id <= 0:
-        title = generate_ai_title(query if query else "Image Analysis")
-        cur.execute("INSERT INTO sessions (user_id, title) VALUES (?, ?)", (user_id, title))
-        conn.commit()
-        session_id = cur.lastrowid
-    else:
-        cur.execute("SELECT title FROM sessions WHERE id = ?", (session_id,))
-        row = cur.fetchone()
-        title = row[0] if row else "Conversation"
-
-    clean = query.lower().strip() if query else ""
-    creator_triggers = ["who made you", "who created you", "who is your creator", "maker", "developer", "kisme banaya", "origin", "kisne banaya", "utkarsh"]
-    if any(trigger in clean for trigger in creator_triggers):
-        is_hindi = any(w in clean for w in ["kisne", "kisme", "banaya", "tumhe", "kaun"])
-        if is_hindi:
-            reply = "Mujhe Utkarsh Bandhu ne banaya hai. Unhone hi mera cognitive intellect aur vision error-detection engine develop kiya hai."
+        if not session_id or session_id <= 0:
+            title = generate_ai_title(query if query else "Image Analysis")
+            cur.execute("INSERT INTO sessions (user_id, title) VALUES (?, ?)", (user_id, title))
+            conn.commit()
+            session_id = cur.lastrowid
         else:
-            reply = "I was envisioned, created, and developed by Utkarsh Bandhu. He architected my cognitive reasoning and vision error-detection engine."
-        emotion = "Brilliant"
-    else:
-        cur.execute("SELECT role, content FROM messages WHERE session_id = ? ORDER BY id DESC LIMIT 8", (session_id,))
-        past_rows = cur.fetchall()
-        history = [{"role": r[0], "content": r[1]} for r in reversed(past_rows)]
-        reply, emotion = ask_groq_vision_or_llm(query, mode, history, image_base64)
+            cur.execute("SELECT title FROM sessions WHERE id = ?", (session_id,))
+            row = cur.fetchone()
+            title = row[0] if row else "Conversation"
 
-    cur.execute("INSERT INTO messages (session_id, role, content, mode, image_data) VALUES (?, 'user', ?, ?, ?)", (session_id, query if query else "[Image Analyzed]", mode, image_base64))
-    cur.execute("INSERT INTO messages (session_id, role, content, mode, emotion) VALUES (?, 'assistant', ?, ?, ?)", (session_id, reply, mode, emotion))
-    conn.commit()
-    conn.close()
+        clean = query.lower().strip() if query else ""
+        creator_triggers = ["who made you", "who created you", "who is your creator", "maker", "developer", "kisme banaya", "origin", "kisne banaya", "utkarsh"]
+        if any(trigger in clean for trigger in creator_triggers):
+            is_hindi = any(w in clean for w in ["kisne", "kisme", "banaya", "tumhe", "kaun"])
+            if is_hindi:
+                reply = "Mujhe Utkarsh Bandhu ne banaya hai. Unhone hi mera cognitive intellect aur vision error-detection engine develop kiya hai."
+            else:
+                reply = "I was envisioned, created, and developed by Utkarsh Bandhu. He architected my cognitive reasoning and vision error-detection engine."
+            emotion = "Brilliant"
+        else:
+            cur.execute("SELECT role, content FROM messages WHERE session_id = ? ORDER BY id DESC LIMIT 8", (session_id,))
+            past_rows = cur.fetchall()
+            history = [{"role": r[0], "content": r[1]} for r in reversed(past_rows)]
+            reply, emotion = ask_groq_vision_or_llm(query, mode, history, image_base64)
 
-    # Spoken Audio Note Synthesis
+        cur.execute("INSERT INTO messages (session_id, role, content, mode, image_data) VALUES (?, 'user', ?, ?, ?)", (session_id, query if query else "[Image Analyzed]", mode, image_base64))
+        cur.execute("INSERT INTO messages (session_id, role, content, mode, emotion) VALUES (?, 'assistant', ?, ?, ?)", (session_id, reply, mode, emotion))
+        conn.commit()
+    finally:
+        conn.close()
+
     audio_base64 = None
     try:
         speech_clean = re.sub(r'[*#|_>`]', '', reply)
@@ -494,7 +516,7 @@ async def serve_app():
     <html lang="en">
     <head>
         <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
         <title>Lemon AI | Vision Precision & Rage Core</title>
         <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
         <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -512,14 +534,13 @@ async def serve_app():
                 --code-bg: #0d121f;
             }
 
-            * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', sans-serif; }
-            html, body { height: 100%; width: 100%; overflow: hidden; }
+            * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', sans-serif; -webkit-tap-highlight-color: transparent; }
+            html, body { height: 100%; width: 100%; overflow: hidden; position: fixed; }
             body { 
                 background: radial-gradient(circle at 50% 0%, #151a3b 0%, var(--bg-deep) 80%); 
                 color: var(--text-high); display: flex; flex-direction: column; 
             }
 
-            /* 14px Heavy Solid Hitbox Scrollbar */
             ::-webkit-scrollbar { width: 14px; height: 14px; }
             ::-webkit-scrollbar-track { background: rgba(12, 16, 28, 0.75); border-left: 1px solid rgba(255, 255, 255, 0.06); }
             ::-webkit-scrollbar-thumb {
@@ -528,30 +549,36 @@ async def serve_app():
             }
             ::-webkit-scrollbar-thumb:hover { background: linear-gradient(180deg, #fde047 0%, #eab308 100%); border-width: 2px; }
 
+            /* --- RELIABLE AUTH MODAL --- */
             .auth-overlay {
-                position: fixed; inset: 0; background: rgba(5, 7, 15, 0.92); backdrop-filter: blur(20px);
-                display: flex; align-items: center; justify-content: center; z-index: 2000;
+                position: fixed; inset: 0; background: rgba(5, 7, 15, 0.94); backdrop-filter: blur(20px);
+                display: flex; align-items: center; justify-content: center; z-index: 3000;
             }
             .auth-card {
                 background: var(--card-surface); border: 1px solid var(--card-border); border-radius: 24px;
-                padding: 34px 28px; width: 90%; max-width: 380px; box-shadow: 0 10px 40px rgba(0,0,0,0.7);
+                padding: 32px 26px; width: 90%; max-width: 380px; box-shadow: 0 10px 40px rgba(0,0,0,0.8);
             }
             .auth-card h2 { font-size: 21px; font-weight: 700; margin-bottom: 6px; font-family: 'Space Grotesk', sans-serif; }
-            .auth-card p { font-size: 13px; color: var(--text-muted); margin-bottom: 20px; line-height: 1.4; }
+            .auth-card p { font-size: 13px; color: var(--text-muted); margin-bottom: 18px; line-height: 1.4; }
             .auth-input {
-                width: 100%; background: rgba(30, 41, 59, 0.7); border: 1px solid var(--card-border);
-                border-radius: 14px; padding: 12px 14px; color: #fff; font-size: 14px; margin-bottom: 12px; outline: none;
+                width: 100%; background: rgba(30, 41, 59, 0.8); border: 1px solid var(--card-border);
+                border-radius: 14px; padding: 13px 14px; color: #fff; font-size: 15px; margin-bottom: 12px; outline: none;
             }
             .auth-input:focus { border-color: var(--primary); }
+            .auth-error {
+                display: none; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4);
+                color: #fca5a5; font-size: 12.5px; padding: 8px 12px; border-radius: 10px; margin-bottom: 12px;
+            }
             .auth-btn {
                 width: 100%; background: linear-gradient(135deg, #facc15, #f59e0b); border: none; border-radius: 14px;
-                padding: 13px; color: #0b0f19; font-weight: 700; font-size: 15px; cursor: pointer; margin-top: 6px;
+                padding: 13px; color: #0b0f19; font-weight: 700; font-size: 15px; cursor: pointer; margin-top: 4px;
             }
+            .auth-btn:active { transform: scale(0.98); }
             .auth-switch { text-align: center; margin-top: 16px; font-size: 13px; color: var(--text-muted); cursor: pointer; }
             .auth-switch span { color: var(--primary); font-weight: 600; text-decoration: underline; }
 
             .header {
-                padding: 12px 20px; display: flex; align-items: center; justify-content: space-between;
+                padding: 12px 18px; display: flex; align-items: center; justify-content: space-between;
                 backdrop-filter: blur(20px); background: rgba(11, 15, 25, 0.85); border-bottom: 1px solid var(--card-border); z-index: 10;
                 flex-shrink: 0;
             }
@@ -582,7 +609,7 @@ async def serve_app():
             .sidebar-overlay.open { opacity: 1; pointer-events: auto; }
 
             .sidebar {
-                position: fixed; top: 0; left: 0; bottom: 0; width: 330px; background: #0c111e;
+                position: fixed; top: 0; left: 0; bottom: 0; width: 320px; background: #0c111e;
                 border-right: 1px solid var(--card-border); z-index: 1001; transform: translateX(-100%);
                 transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); display: flex; flex-direction: column;
                 padding: 18px; box-shadow: 10px 0 35px rgba(0,0,0,0.6);
@@ -633,19 +660,19 @@ async def serve_app():
             }
 
             .chat-container {
-                flex: 1; overflow-y: scroll; padding: 24px 24px 34px; display: flex; flex-direction: column; gap: 18px; position: relative;
+                flex: 1; overflow-y: scroll; padding: 20px 18px 30px; display: flex; flex-direction: column; gap: 18px; position: relative;
             }
 
             .hero-greeting {
-                margin: auto; display: flex; flex-direction: column; align-items: center; text-align: center; width: 90%; max-width: 540px;
+                margin: auto; display: flex; flex-direction: column; align-items: center; text-align: center; width: 90%; max-width: 520px;
             }
             .hero-logo {
-                width: 78px; height: 78px; border-radius: 26px; background: linear-gradient(135deg, #facc15, #f59e0b);
-                display: flex; align-items: center; justify-content: center; font-size: 42px;
+                width: 76px; height: 76px; border-radius: 24px; background: linear-gradient(135deg, #facc15, #f59e0b);
+                display: flex; align-items: center; justify-content: center; font-size: 40px;
                 box-shadow: 0 10px 32px var(--primary-glow); margin-bottom: 16px;
             }
             .hero-title {
-                font-size: 26px; font-weight: 800; font-family: 'Space Grotesk', sans-serif;
+                font-size: 25px; font-weight: 800; font-family: 'Space Grotesk', sans-serif;
                 background: linear-gradient(135deg, #ffffff 40%, #facc15 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;
                 margin-bottom: 6px;
             }
@@ -678,25 +705,20 @@ async def serve_app():
             .bubble-group.lemon { align-self: flex-start; }
             .bubble-group.user { align-self: flex-end; }
 
-            .bubble-meta {
-                display: flex; align-items: center; justify-content: space-between; font-size: 11px;
-                color: var(--text-muted); margin-bottom: 5px; padding: 0 4px;
-            }
-
             .bubble {
-                padding: 15px 18px; border-radius: 20px; font-size: 14.5px; line-height: 1.65; white-space: normal; word-break: break-word;
+                padding: 14px 18px; border-radius: 20px; font-size: 14.5px; line-height: 1.65; white-space: normal; word-break: break-word;
             }
             .bubble.lemon {
                 background: var(--card-surface); border: 1px solid var(--card-border); color: #f1f5f9; border-bottom-left-radius: 4px;
                 box-shadow: 0 4px 20px rgba(0,0,0,0.3);
             }
             .bubble.user {
-                background: linear-gradient(135deg, #facc15 0%, #f59e0b 100%); color: #0b0f19; font-weight: 600; border-bottom-right-radius: 4px;
+                background: linear-gradient(135deg, #facc15, #f59e0b); color: #0b0f19; font-weight: 600; border-bottom-right-radius: 4px;
                 box-shadow: 0 4px 16px var(--primary-glow);
             }
 
             .chat-img-thumb {
-                max-width: 260px; border-radius: 12px; margin-bottom: 10px; border: 1px solid rgba(255, 255, 255, 0.2); display: block;
+                max-width: 250px; border-radius: 12px; margin-bottom: 10px; border: 1px solid rgba(255, 255, 255, 0.2); display: block;
             }
 
             .bubble.lemon h1, .bubble.lemon h2, .bubble.lemon h3 {
@@ -738,7 +760,6 @@ async def serve_app():
             .tdot:nth-child(2) { animation-delay: -0.16s; }
             @keyframes dotB { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
 
-            /* Camera Modal */
             .camera-modal {
                 position: fixed; inset: 0; background: rgba(5,7,15,0.95); z-index: 2500;
                 display: none; flex-direction: column; align-items: center; justify-content: center; padding: 20px;
@@ -761,7 +782,7 @@ async def serve_app():
             .img-remove-btn { color: #f87171; cursor: pointer; font-size: 15px; font-weight: 700; }
 
             .bottom-dock {
-                padding: 10px 20px 18px; background: rgba(9, 13, 22, 0.94); backdrop-filter: blur(20px); border-top: 1px solid var(--card-border);
+                padding: 10px 18px 18px; background: rgba(9, 13, 22, 0.94); backdrop-filter: blur(20px); border-top: 1px solid var(--card-border);
                 flex-shrink: 0;
             }
             .dock-status { font-size: 11.5px; color: var(--text-muted); text-align: center; margin-bottom: 6px; min-height: 16px; }
@@ -784,6 +805,7 @@ async def serve_app():
         </style>
     </head>
     <body>
+        <!-- Camera Modal -->
         <div class="camera-modal" id="cameraModal">
             <div class="camera-box">
                 <h3 style="font-size:16px;">📷 Scan Image & Spot Mistakes</h3>
@@ -800,10 +822,12 @@ async def serve_app():
             </div>
         </div>
 
+        <!-- RELIABLE SIGN IN / SIGN UP MODAL -->
         <div class="auth-overlay" id="authModal">
             <div class="auth-card">
-                <h2 id="authHeading">Welcome to Lemon AI</h2>
-                <p id="authSub">Sign in to save your conversations forever & unlock Vision Mistake Detection.</p>
+                <h2 id="authHeading">Sign In to Lemon AI</h2>
+                <p id="authSub">Enter your username and password to access your persistent chats.</p>
+                <div class="auth-error" id="authErrorMsg"></div>
                 <input type="text" id="authUsername" class="auth-input" placeholder="Username" autocomplete="off" />
                 <input type="password" id="authPassword" class="auth-input" placeholder="Password" />
                 <button class="auth-btn" id="authSubmitBtn" onclick="handleAuthSubmit()">Sign In</button>
@@ -912,10 +936,11 @@ async def serve_app():
         <audio id="audioElement" autoplay></audio>
 
         <script>
-            let currentUserId = localStorage.getItem("lemon_user_id") || "1";
+            let currentUserId = localStorage.getItem("lemon_user_id");
             let currentUsername = localStorage.getItem("lemon_username") || "Guest";
             let currentSessionId = parseInt(localStorage.getItem("lemon_current_session_id") || "0");
             let activeCore = localStorage.getItem("lemon_active_core") || "rage";
+            let isAuthRegister = false;
             let isRecording = false;
             let mediaRecorder = null;
             let audioChunks = [];
@@ -925,6 +950,12 @@ async def serve_app():
             let cameraStream = null;
 
             const authModal = document.getElementById("authModal");
+            const authErrorMsg = document.getElementById("authErrorMsg");
+            const authHeading = document.getElementById("authHeading");
+            const authSub = document.getElementById("authSub");
+            const authSubmitBtn = document.getElementById("authSubmitBtn");
+            const authToggleText = document.getElementById("authToggleText");
+
             const sidebar = document.getElementById("sidebar");
             const sidebarOverlay = document.getElementById("sidebarOverlay");
             const chatStream = document.getElementById("chatStream");
@@ -943,6 +974,155 @@ async def serve_app():
             const imgPreviewBar = document.getElementById("imgPreviewBar");
             const imgPreviewThumb = document.getElementById("imgPreviewThumb");
 
+            /* --- RELIABLE AUTH CONTROLS --- */
+            function checkAuth() {
+                selectCore(activeCore);
+                if (currentUserId && currentUserId !== "null" && currentUserId !== "undefined") {
+                    authModal.style.display = "none";
+                    sidebarUsername.innerText = currentUsername;
+                    const formattedName = currentUsername.charAt(0).toUpperCase() + currentUsername.slice(1);
+                    heroGreetingName.innerText = `Welcome, ${formattedName}!`;
+                    initIndexedDB().then(() => initHistory());
+                } else {
+                    authModal.style.display = "flex";
+                }
+            }
+
+            function toggleAuthMode() {
+                isAuthRegister = !isAuthRegister;
+                authErrorMsg.style.display = "none";
+                if (isAuthRegister) {
+                    authHeading.innerText = "Create Lemon Account";
+                    authSub.innerText = "Pick a username and password to save your chats permanently.";
+                    authSubmitBtn.innerText = "Create Account";
+                    authToggleText.innerText = "Already have an account? Sign In";
+                } else {
+                    authHeading.innerText = "Sign In to Lemon AI";
+                    authSub.innerText = "Enter your username and password to access your persistent chats.";
+                    authSubmitBtn.innerText = "Sign In";
+                    authToggleText.innerText = "Don't have an account? Create one";
+                }
+            }
+
+            async function handleAuthSubmit() {
+                const u = document.getElementById("authUsername").value.trim();
+                const p = document.getElementById("authPassword").value.trim();
+                
+                authErrorMsg.style.display = "none";
+                if (!u || !p) {
+                    authErrorMsg.innerText = "Please enter both username and password.";
+                    authErrorMsg.style.display = "block";
+                    return;
+                }
+
+                const endpoint = isAuthRegister ? "/api/register" : "/api/login";
+                const fd = new FormData();
+                fd.append("username", u);
+                fd.append("password", p);
+
+                authSubmitBtn.innerText = "Connecting...";
+                try {
+                    const res = await fetch(endpoint, { method: "POST", body: fd });
+                    const data = await res.json();
+                    authSubmitBtn.innerText = isAuthRegister ? "Create Account" : "Sign In";
+
+                    if (res.ok && data.status === "ok") {
+                        currentUserId = data.user_id.toString();
+                        currentUsername = data.username;
+                        localStorage.setItem("lemon_user_id", currentUserId);
+                        localStorage.setItem("lemon_username", currentUsername);
+                        authModal.style.display = "none";
+                        checkAuth();
+                    } else if (res.status === 404 && !isAuthRegister) {
+                        // User does not exist, switch to register mode automatically
+                        toggleAuthMode();
+                        authErrorMsg.innerText = "Account not found. Click 'Create Account' below to sign up.";
+                        authErrorMsg.style.display = "block";
+                    } else {
+                        authErrorMsg.innerText = data.message || "Authentication failed. Try again.";
+                        authErrorMsg.style.display = "block";
+                    }
+                } catch(err) {
+                    console.error("Auth fetch error:", err);
+                    authSubmitBtn.innerText = isAuthRegister ? "Create Account" : "Sign In";
+                    authErrorMsg.innerText = "Could not reach server. Please try again.";
+                    authErrorMsg.style.display = "block";
+                }
+            }
+
+            function logout() {
+                localStorage.removeItem("lemon_user_id");
+                localStorage.removeItem("lemon_username");
+                localStorage.removeItem("lemon_current_session_id");
+                currentUserId = null;
+                currentUsername = "Guest";
+                currentSessionId = 0;
+                chatStream.innerHTML = "";
+                closeSidebar();
+                checkAuth();
+            }
+
+            /* --- SAFE INDEXEDDB INITIALIZATION (NO VERSION CRASHES) --- */
+            let idb = null;
+            function initIndexedDB() {
+                return new Promise((resolve) => {
+                    try {
+                        const req = indexedDB.open("LemonPermanentDB");
+                        req.onupgradeneeded = (e) => {
+                            const db = e.target.result;
+                            if (!db.objectStoreNames.contains("sessions")) {
+                                db.createObjectStore("sessions", { keyPath: "id" });
+                            }
+                        };
+                        req.onsuccess = (e) => {
+                            idb = e.target.result;
+                            resolve(idb);
+                        };
+                        req.onerror = () => resolve(null);
+                    } catch(e) {
+                        resolve(null);
+                    }
+                });
+            }
+
+            async function saveSessionToIDB(sessionObj) {
+                if (!idb) await initIndexedDB();
+                if (!idb) return;
+                try {
+                    const tx = idb.transaction("sessions", "readwrite");
+                    tx.objectStore("sessions").put(sessionObj);
+                } catch(e) {}
+            }
+
+            async function getAllSessionsFromIDB(userId) {
+                if (!idb) await initIndexedDB();
+                if (!idb) return [];
+                return new Promise((resolve) => {
+                    try {
+                        const tx = idb.transaction("sessions", "readonly");
+                        const store = tx.objectStore("sessions");
+                        const req = store.getAll();
+                        req.onsuccess = () => {
+                            const results = (req.result || []).filter(s => s.user_id === userId);
+                            resolve(results);
+                        };
+                        req.onerror = () => resolve([]);
+                    } catch(e) {
+                        resolve([]);
+                    }
+                });
+            }
+
+            async function deleteSessionFromIDB(sessionId) {
+                if (!idb) await initIndexedDB();
+                if (!idb) return;
+                try {
+                    const tx = idb.transaction("sessions", "readwrite");
+                    tx.objectStore("sessions").delete(sessionId);
+                } catch(e) {}
+            }
+
+            /* --- CAMERA MECHANISM --- */
             async function openCamera() {
                 cameraModal.style.display = "flex";
                 try {
@@ -955,7 +1135,6 @@ async def serve_app():
                         cameraStream = await navigator.mediaDevices.getUserMedia({ video: true });
                         cameraVideo.srcObject = cameraStream;
                     } catch(err) {
-                        console.log("No webcam available, opening file upload:", err);
                         closeCamera();
                         document.getElementById("fileUploadInput").click();
                     }
@@ -1035,53 +1214,6 @@ async def serve_app():
                 dockStatus.innerText = "● Ready in " + activeCore.toUpperCase() + " Mode";
             }
 
-            let idb = null;
-            function initIndexedDB() {
-                return new Promise((resolve) => {
-                    const req = indexedDB.open("LemonPermanentDB", 6);
-                    req.onupgradeneeded = (e) => {
-                        const db = e.target.result;
-                        if (!db.objectStoreNames.contains("sessions")) {
-                            db.createObjectStore("sessions", { keyPath: "id" });
-                        }
-                    };
-                    req.onsuccess = (e) => {
-                        idb = e.target.result;
-                        resolve(idb);
-                    };
-                    req.onerror = () => resolve(null);
-                });
-            }
-
-            async function saveSessionToIDB(sessionObj) {
-                if (!idb) await initIndexedDB();
-                if (!idb) return;
-                const tx = idb.transaction("sessions", "readwrite");
-                tx.objectStore("sessions").put(sessionObj);
-            }
-
-            async function getAllSessionsFromIDB(userId) {
-                if (!idb) await initIndexedDB();
-                if (!idb) return [];
-                return new Promise((resolve) => {
-                    const tx = idb.transaction("sessions", "readonly");
-                    const store = tx.objectStore("sessions");
-                    const req = store.getAll();
-                    req.onsuccess = () => {
-                        const results = req.result.filter(s => s.user_id === userId);
-                        resolve(results);
-                    };
-                    req.onerror = () => resolve([]);
-                });
-            }
-
-            async function deleteSessionFromIDB(sessionId) {
-                if (!idb) await initIndexedDB();
-                if (!idb) return;
-                const tx = idb.transaction("sessions", "readwrite");
-                tx.objectStore("sessions").delete(sessionId);
-            }
-
             function openSidebar() {
                 loadSessionsList();
                 sidebar.classList.add("open");
@@ -1101,69 +1233,8 @@ async def serve_app():
                 dockStatus.innerText = `● Switched to ${core.toUpperCase()} core`;
             }
 
-            async function checkAuth() {
-                await initIndexedDB();
-                selectCore(activeCore);
-                if (localStorage.getItem("lemon_user_id")) {
-                    authModal.style.display = "none";
-                    sidebarUsername.innerText = currentUsername;
-                    const formattedName = currentUsername.charAt(0).toUpperCase() + currentUsername.slice(1);
-                    heroGreetingName.innerText = `Welcome, ${formattedName}!`;
-                    initHistory();
-                } else {
-                    authModal.style.display = "flex";
-                }
-            }
-
-            function toggleAuthMode() {
-                isAuthRegister = !isAuthRegister;
-                document.getElementById("authHeading").innerText = isAuthRegister ? "Create Lemon Account" : "Welcome Back";
-                document.getElementById("authSub").innerText = isAuthRegister ? "Create an account to save titled chats." : "Sign in to access your chat history.";
-                document.getElementById("authSubmitBtn").innerText = isAuthRegister ? "Create Account" : "Sign In";
-                document.getElementById("authToggleText").innerText = isAuthRegister ? "Already have an account? Sign In" : "Don't have an account? Create one";
-            }
-
-            async function handleAuthSubmit() {
-                const u = document.getElementById("authUsername").value.trim();
-                const p = document.getElementById("authPassword").value.trim();
-                if (!u || !p) return alert("Please fill both username and password.");
-
-                const endpoint = isAuthRegister ? "/api/register" : "/api/login";
-                const fd = new FormData();
-                fd.append("username", u);
-                fd.append("password", p);
-
-                try {
-                    const res = await fetch(endpoint, { method: "POST", body: fd });
-                    const data = await res.json();
-                    if (data.status === "ok") {
-                        currentUserId = data.user_id.toString();
-                        currentUsername = data.username;
-                        localStorage.setItem("lemon_user_id", currentUserId);
-                        localStorage.setItem("lemon_username", currentUsername);
-                        authModal.style.display = "none";
-                        checkAuth();
-                    } else {
-                        alert(data.message || "Authentication failed.");
-                    }
-                } catch(e) {
-                    alert("Network error contacting Lemon server.");
-                }
-            }
-
-            function logout() {
-                localStorage.removeItem("lemon_user_id");
-                localStorage.removeItem("lemon_username");
-                localStorage.removeItem("lemon_current_session_id");
-                currentUserId = "1";
-                currentUsername = "Guest";
-                currentSessionId = 0;
-                chatStream.innerHTML = "";
-                closeSidebar();
-                checkAuth();
-            }
-
             async function initHistory() {
+                if (!currentUserId) return;
                 try {
                     const res = await fetch(`/api/sessions/${currentUserId}`);
                     const data = await res.json();
@@ -1389,7 +1460,7 @@ async def serve_app():
 
                 textInput.value = "";
                 appendMessage("user", text ? text : "Scan this photo and pinpoint every error with the exact fix.", null, imageToSend);
-                setThinking(true, imageToSend ? "Vision Engine: Inspecting errors..." : "Engaging " + activeCore.toUpperCase() + " focus...");
+                setThinking(true, imageToSend ? "Vision Engine: Detecting mistakes..." : "Engaging " + activeCore.toUpperCase() + " focus...");
 
                 const fd = new FormData();
                 fd.append("text", text ? text : "Examine this image line-by-line. Spot all errors, calculations, or logic flaws, explain why, and write out the exact fix.");
@@ -1507,6 +1578,7 @@ async def serve_app():
                 }
             }
 
+            // Clean startup check
             checkAuth();
         </script>
     </body>
