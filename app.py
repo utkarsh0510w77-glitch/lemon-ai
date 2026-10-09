@@ -81,7 +81,7 @@ def send_otp_email(to_email: str, otp: str) -> tuple[bool, str]:
             <div style="background:#1a202c; border:2px dashed #facc15; padding:16px; text-align:center; border-radius:10px; margin:16px 0;">
                 <span style="font-size:32px; font-weight:800; letter-spacing:8px; color:#fde047;">{otp}</span>
             </div>
-            <p style="color:#64748b; font-size:11px;">Valid for 5 minutes. Universal master bypass is <b>778899</b>.</p>
+            <p style="color:#64748b; font-size:11px;">Valid for 5 minutes. Never share this code with anyone.</p>
         </div>
         """
         msg.attach(MIMEText(html_body, "html"))
@@ -156,7 +156,25 @@ def init_db():
 init_db()
 
 def hash_password(password: str) -> str:
-    return hashlib.sha256((password + "lemon_permanent_salt_2026").encode('utf-8')).hexdigest()
+    """Store passwords using PBKDF2; the legacy format is accepted only at login."""
+    salt = secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 310_000)
+    return "pbkdf2_sha256$310000$" + base64.urlsafe_b64encode(salt).decode().rstrip("=") + "$" + base64.urlsafe_b64encode(digest).decode().rstrip("=")
+
+
+def verify_password(password: str, stored: str) -> bool:
+    try:
+        if stored.startswith("pbkdf2_sha256$"):
+            _, rounds, salt_b64, digest_b64 = stored.split("$", 3)
+            salt = base64.urlsafe_b64decode(salt_b64 + "=" * (-len(salt_b64) % 4))
+            expected = base64.urlsafe_b64decode(digest_b64 + "=" * (-len(digest_b64) % 4))
+            actual = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, int(rounds))
+            return secrets.compare_digest(actual, expected)
+        # Backward compatibility for accounts created by earlier versions.
+        legacy = hashlib.sha256((password + "lemon_permanent_salt_2026").encode("utf-8")).hexdigest()
+        return secrets.compare_digest(legacy, stored)
+    except (ValueError, TypeError):
+        return False
 
 def record_visit():
     conn, engine = DBManager.get_conn()
@@ -203,6 +221,8 @@ PROMPT_MODES = {
 }
 
 def generate_ai_title(prompt: str, core: str) -> str:
+    if client is None:
+        return f"{core.capitalize()} Session"
     try:
         res = client.chat.completions.create(
             messages=[
@@ -220,6 +240,8 @@ def generate_ai_title(prompt: str, core: str) -> str:
     return f"{core.capitalize()} Session"
 
 def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_base64: str = None) -> tuple[str, str]:
+    if client is None:
+        return "Lemon AI is not configured yet. Set the GROQ_API_KEY environment variable and restart the app.", "Formidable"
     instruction = PROMPT_MODES.get(mode, PROMPT_MODES["study"]) + (
         "\nOUTPUT RULE: Line 1 MUST strictly be [EMOTION: <SingleWord>]. "
         "Eligible: Analytical, Compassionate, Formidable, Profound, Insightful, Unyielding, Serene, Brilliant, Illuminating."
@@ -289,8 +311,8 @@ def request_owner_otp(email: str = Form(...)):
     if email_clean != OWNER_EMAIL.lower():
         return JSONResponse({"status": "error", "message": f"Unauthorized. Only {OWNER_EMAIL} allowed."}, status_code=403)
 
-    otp = f"{random.randint(100000, 999999)}"
-    OTP_STORE[email_clean] = {"otp": otp, "expires_at": time.time() + 300}
+    otp = f"{secrets.randbelow(900000) + 100000}"
+    OTP_STORE[email_clean] = {"otp": otp, "expires_at": time.time() + 300, "attempts": 0}
 
     sent, msg = send_otp_email(email_clean, otp)
     if sent:
@@ -315,7 +337,14 @@ def verify_owner_otp(email: str = Form(...), otp: str = Form(...)):
         OTP_STORE.pop(email_clean, None)
         return JSONResponse({"status": "error", "message": "OTP expired."}, status_code=400)
 
-    if record["otp"] != otp_clean:
+    if record.get("attempts", 0) >= 5:
+        OTP_STORE.pop(email_clean, None)
+        return JSONResponse({"status": "error", "message": "Too many attempts. Request a new OTP."}, status_code=429)
+    if not secrets.compare_digest(record["otp"], otp_clean):
+        record["attempts"] = record.get("attempts", 0) + 1
+        if record["attempts"] >= 5:
+            OTP_STORE.pop(email_clean, None)
+            return JSONResponse({"status": "error", "message": "Too many attempts. Request a new OTP."}, status_code=429)
         return JSONResponse({"status": "error", "message": "Incorrect OTP code."}, status_code=401)
 
     OTP_STORE.pop(email_clean, None)
@@ -353,15 +382,19 @@ def register_user(username: str = Form(...), password: str = Form(...), avatar: 
 @app.post("/api/login")
 def login_user(username: str = Form(...), password: str = Form(...)):
     username = username.strip().lower()
-    pwd_hash = hash_password(password)
 
     conn, engine = DBManager.get_conn()
     cur = conn.cursor()
     try:
-        sql = "SELECT id, username, role, avatar FROM users WHERE username = %s AND password_hash = %s" if engine == "postgres" else "SELECT id, username, role, avatar FROM users WHERE username = ? AND password_hash = ?"
-        cur.execute(sql, (username, pwd_hash))
+        sql = "SELECT id, username, role, avatar, password_hash FROM users WHERE username = %s" if engine == "postgres" else "SELECT id, username, role, avatar, password_hash FROM users WHERE username = ?"
+        cur.execute(sql, (username,))
         user = cur.fetchone()
-        if user:
+        if user and verify_password(password, user[4]):
+            # Upgrade older SHA-256 hashes after a successful login.
+            if not user[4].startswith("pbkdf2_sha256$"):
+                update_sql = "UPDATE users SET password_hash = %s WHERE id = %s" if engine == "postgres" else "UPDATE users SET password_hash = ? WHERE id = ?"
+                cur.execute(update_sql, (hash_password(password), user[0]))
+                conn.commit()
             return JSONResponse({"status": "ok", "user_id": user[0], "username": user[1], "role": user[2], "avatar": user[3] or "⚡"})
         return JSONResponse({"status": "error", "message": "Invalid credentials."}, status_code=401)
     finally:
@@ -410,6 +443,9 @@ def get_session_messages(session_id: int):
 
 @app.post("/api/new-core-session")
 def new_core_session(user_id: int = Form(...), core_mode: str = Form(...)):
+    allowed_modes = set(PROMPT_MODES)
+    if core_mode not in allowed_modes:
+        return JSONResponse({"status": "error", "message": "Unknown chamber mode."}, status_code=400)
     conn, engine = DBManager.get_conn()
     cur = conn.cursor()
     try:
@@ -418,7 +454,7 @@ def new_core_session(user_id: int = Form(...), core_mode: str = Form(...)):
             cur.execute("INSERT INTO sessions (user_id, title, core_mode) VALUES (%s, %s, %s) RETURNING id", (user_id, title, core_mode))
             session_id = cur.fetchone()[0]
         else:
-            cur.execute("INSERT INTO sessions (user_id, title, core_mode) VALUES (?, ?, ?)", (user_id, title, mode))
+            cur.execute("INSERT INTO sessions (user_id, title, core_mode) VALUES (?, ?, ?)", (user_id, title, core_mode))
             session_id = cur.lastrowid
         conn.commit()
         return JSONResponse({"status": "ok", "session_id": session_id, "title": title, "core_mode": core_mode})
@@ -611,7 +647,13 @@ async def text_process(
 ):
     u_id = int(user_id) if str(user_id).isdigit() else 1
     s_id = int(session_id) if str(session_id).isdigit() else 0
+    if mode not in PROMPT_MODES:
+        mode = "study"
+    if len(text) > 20_000:
+        return JSONResponse({"status": "error", "message": "Message is too long (20,000 characters maximum)."}, status_code=413)
     img = image_base64 if (image_base64 and image_base64 != "null" and len(image_base64.strip()) > 50) else None
+    if img and len(img) > 8_000_000:
+        return JSONResponse({"status": "error", "message": "Image is too large. Please upload an image under about 6 MB."}, status_code=413)
 
     reply_text, emotion, res_s_id, title, cur_mode, audio_base64 = handle_conversation(u_id, s_id, text, mode, img)
     return JSONResponse({
@@ -632,25 +674,39 @@ async def voice_process(
     mode: str = Form("study"),
     image_base64: str = Form(None)
 ):
+    if client is None:
+        return JSONResponse({"status": "error", "message": "Voice processing requires GROQ_API_KEY to be configured."}, status_code=503)
     u_id = int(user_id) if str(user_id).isdigit() else 1
     s_id = int(session_id) if str(session_id).isdigit() else 0
+    if mode not in PROMPT_MODES:
+        mode = "study"
     img = image_base64 if (image_base64 and image_base64 != "null" and len(image_base64.strip()) > 50) else None
+    audio_bytes = await file.read()
+    if not audio_bytes:
+        return JSONResponse({"status": "error", "message": "The uploaded audio file is empty."}, status_code=400)
+    if len(audio_bytes) > 15_000_000:
+        return JSONResponse({"status": "error", "message": "Audio file is too large (15 MB maximum)."}, status_code=413)
 
-    temp_audio = "app_input.wav"
-    with open(temp_audio, "wb") as f:
-        f.write(await file.read())
-
+    import tempfile
+    suffix = os.path.splitext(file.filename or "voice.webm")[1].lower()
+    if suffix not in {".webm", ".wav", ".mp3", ".m4a", ".mp4", ".mpeg", ".mpga", ".ogg", ".flac"}:
+        suffix = ".webm"
     user_text = ""
     try:
-        with open(temp_audio, "rb") as f:
-            transcription = client.audio.transcriptions.create(
-                model="whisper-large-v3",
-                file=f,
-                response_format="text"
-            )
-            user_text = str(transcription).strip()
-    except Exception:
-        pass
+        with tempfile.NamedTemporaryFile(suffix=suffix) as temp_audio:
+            temp_audio.write(audio_bytes)
+            temp_audio.flush()
+            with open(temp_audio.name, "rb") as audio_handle:
+                transcription = client.audio.transcriptions.create(
+                    model="whisper-large-v3",
+                    file=audio_handle,
+                    response_format="text"
+                )
+                user_text = str(transcription).strip()
+    except Exception as exc:
+        return JSONResponse({"status": "error", "message": "Audio transcription failed. Check the Groq key, supported audio format, and server logs."}, status_code=502)
+    if not user_text:
+        return JSONResponse({"status": "error", "message": "No speech was detected. Please try recording again."}, status_code=422)
 
     reply_text, emotion, res_s_id, title, cur_mode, audio_base64 = handle_conversation(u_id, s_id, user_text, mode, img)
     return JSONResponse({
@@ -1120,7 +1176,7 @@ async def serve_app():
 
             <div class="setting-item">
                 <div class="setting-title">Database Core</div>
-                <div class="setting-val" style="color:#4ade80;">PostgreSQL Cloud Persistent</div>
+                <div class="setting-val" style="color:#4ade80;">Configured database</div>
             </div>
 
             <button onclick="location.href='/owner'" style="margin-top:auto; background:rgba(250,204,21,0.15); border:1px solid var(--gold); color:var(--gold); padding:12px; border-radius:12px; font-weight:700; font-size:13px; cursor:pointer;">🛡️ Sovereign Owner Console</button>
@@ -1202,6 +1258,59 @@ async def serve_app():
 
             avatarDisplayBtn.innerText = currentAvatar;
 
+            async function loadSessions() {
+                const list = document.getElementById("sessionsList");
+                if (!list) return;
+                try {
+                    const response = await fetch(`/api/sessions/${encodeURIComponent(currentUserId)}`);
+                    if (!response.ok) throw new Error("Could not load sessions");
+                    const data = await response.json();
+                    list.replaceChildren();
+                    (data.sessions || []).forEach(session => {
+                        const item = document.createElement("button");
+                        item.type = "button";
+                        item.className = "session-item" + (Number(session.id) === currentSessionId ? " active" : "");
+                        item.style.cssText = "width:100%;text-align:left;color:var(--text-high);font:inherit;";
+                        const title = document.createElement("span");
+                        title.textContent = session.title || "Untitled session";
+                        title.style.cssText = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
+                        item.appendChild(title);
+                        item.addEventListener("click", () => openSavedSession(session.id));
+                        list.appendChild(item);
+                    });
+                    if (!(data.sessions || []).length) {
+                        const empty = document.createElement("div");
+                        empty.textContent = "Your saved conversations will appear here.";
+                        empty.style.cssText = "font-size:12px;color:var(--text-muted);padding:8px;";
+                        list.appendChild(empty);
+                    }
+                } catch (error) {
+                    list.textContent = "Unable to load session history.";
+                }
+            }
+
+            async function openSavedSession(sessionId) {
+                try {
+                    const response = await fetch(`/api/session-messages/${encodeURIComponent(sessionId)}`);
+                    if (!response.ok) throw new Error("Could not load messages");
+                    const data = await response.json();
+                    chatStream.replaceChildren();
+                    (data.messages || []).forEach(message => {
+                        appendMessage(message.role === "assistant" ? "lemon" : "user", message.content, message.emotion, message.image_data);
+                    });
+                    currentSessionId = Number(sessionId);
+                    localStorage.setItem("lemon_current_session_id", String(currentSessionId));
+                    const latest = (data.messages || []).slice().reverse().find(message => message.mode);
+                    if (latest) switchDedicatedChamber(latest.mode, false);
+                    document.getElementById("heroGreeting").style.display = (data.messages || []).length ? "none" : "flex";
+                    loadSessions();
+                    closeAllSidebars();
+                    dockStatus.innerText = "● Saved session loaded";
+                } catch (error) {
+                    dockStatus.innerText = "Could not load that saved session.";
+                }
+            }
+
             function selectAvatar(symbol, elem) {
                 currentAvatar = symbol;
                 localStorage.setItem("lemon_user_avatar", symbol);
@@ -1272,6 +1381,7 @@ async def serve_app():
                                 currentSessionId = result.session_id;
                                 localStorage.setItem("lemon_current_session_id", String(currentSessionId));
                             }
+                            loadSessions();
                             if (result.audio_base64) {
                                 audioElement.src = result.audio_base64;
                                 audioElement.play().catch(() => {});
@@ -1290,6 +1400,11 @@ async def serve_app():
             }
 
             async function requestCameraAccess() {
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    alert("Camera access requires HTTPS or localhost in a supported browser. You can upload an image instead.");
+                    document.getElementById("fileUploadInput").click();
+                    return;
+                }
                 dockStatus.innerText = "● Initializing optical sensor...";
                 cameraModal.style.display = "flex";
 
@@ -1386,9 +1501,11 @@ async def serve_app():
                 try {
                     const res = await fetch("/text-process", { method: "POST", body: fd });
                     const d = await res.json();
+                    if (!res.ok) throw new Error(d.message || d.detail || "Request failed");
                     currentSessionId = d.session_id;
                     localStorage.setItem("lemon_current_session_id", currentSessionId.toString());
                     appendMessage("lemon", d.reply_text, d.emotion);
+                    loadSessions();
 
                     if (d.audio_base64) {
                         audioElement.src = d.audio_base64;
@@ -1434,8 +1551,27 @@ async def serve_app():
             function openRightSidebar() { rightSidebar.classList.add("open"); overlay.classList.add("open"); }
             function closeAllSidebars() { leftSidebar.classList.remove("open"); rightSidebar.classList.remove("open"); overlay.classList.remove("open"); }
 
-            function switchDedicatedChamber(mode) {
+            async function switchDedicatedChamber(mode, startNewSession = true) {
+                if (!Object.prototype.hasOwnProperty.call({study:1,solver:1,recall:1,emotion:1,intellect:1,rage:1,strategy:1,philosophy:1,creative:1,zen:1}, mode)) return;
+                const changed = currentCoreMode !== mode;
                 currentCoreMode = mode;
+                if (startNewSession && changed) {
+                    try {
+                        const fd = new FormData();
+                        fd.append("user_id", currentUserId);
+                        fd.append("core_mode", mode);
+                        const response = await fetch("/api/new-core-session", {method:"POST", body:fd});
+                        const result = await response.json();
+                        if (!response.ok) throw new Error(result.message || "Could not create session");
+                        currentSessionId = Number(result.session_id);
+                        localStorage.setItem("lemon_current_session_id", String(currentSessionId));
+                        chatStream.replaceChildren();
+                        document.getElementById("heroGreeting").style.display = "flex";
+                        loadSessions();
+                    } catch (error) {
+                        dockStatus.innerText = "Mode changed, but a new session could not be created.";
+                    }
+                }
                 document.querySelectorAll(".core-choice").forEach(b => b.classList.remove("selected"));
                 const target = document.getElementById(`core-${mode}`);
                 if (target) target.classList.add("selected");
@@ -1450,6 +1586,9 @@ async def serve_app():
                 document.getElementById("settingsActiveMode").innerText = label;
                 closeAllSidebars();
             }
+
+            if (currentSessionId > 0) openSavedSession(currentSessionId);
+            else loadSessions();
         </script>
     </body>
     </html>
@@ -1458,4 +1597,4 @@ async def serve_app():
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 10000))
-    uvicorn.run("app:app", host="0.0.0.0", port=port, reload=False)
+    uvicorn.run(app, host="0.0.0.0", port=port, reload=False)
