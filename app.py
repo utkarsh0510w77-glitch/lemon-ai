@@ -21,7 +21,7 @@ client = Groq(api_key=GROQ_API_KEY)
 
 OWNER_USERNAME = "utkarsh"
 
-app = FastAPI(title="Lemon AI - Dedicated Owner Command Center")
+app = FastAPI(title="Lemon AI - Sovereign Command & Visual Bug Reporting")
 
 app.add_middleware(
     CORSMiddleware,
@@ -91,10 +91,16 @@ def init_db():
                 username TEXT NOT NULL,
                 category TEXT NOT NULL,
                 message TEXT NOT NULL,
+                image_proof TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY(user_id) REFERENCES users(id)
             )
         """)
+        # Safe schema migration for complaints image_proof if table exists from previous build
+        try:
+            cur.execute("ALTER TABLE complaints ADD COLUMN image_proof TEXT")
+        except sqlite3.OperationalError:
+            pass
         conn.commit()
     finally:
         conn.close()
@@ -125,7 +131,7 @@ def update_user_heartbeat(user_id: int):
     finally:
         conn.close()
 
-# ----------------- COGNITIVE SYSTEM PROMPTS -----------------
+# ----------------- COGNITIVE PROMPTS -----------------
 INTELLECTUAL_BASE_RULE = (
     "COGNITIVE STANDARD & METAPROMPT: "
     "You are Lemon—an ultra-intellectual synthetic mind engineered by Utkarsh Bandhu. "
@@ -276,9 +282,11 @@ def login_user(username: str = Form(...), password: str = Form(...)):
         cur.execute("SELECT id, username, role FROM users WHERE username = ? AND password_hash = ?", (username, pwd_hash))
         user = cur.fetchone()
         if user:
-            cur.execute("UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE id = ?", (user[0],))
+            # Auto-promote to owner if username is utkarsh
+            user_role = "owner" if username == OWNER_USERNAME.lower() else user[2]
+            cur.execute("UPDATE users SET last_active = CURRENT_TIMESTAMP, role = ? WHERE id = ?", (user_role, user[0]))
             conn.commit()
-            return JSONResponse({"status": "ok", "user_id": user[0], "username": user[1], "role": user[2]})
+            return JSONResponse({"status": "ok", "user_id": user[0], "username": user[1], "role": user_role})
         
         cur.execute("SELECT id FROM users WHERE username = ?", (username,))
         if not cur.fetchone():
@@ -340,50 +348,76 @@ def delete_session(session_id: int = Form(...)):
     finally:
         conn.close()
 
+# ----------------- COMPLAINTS / FEEDBACK WITH PHOTO -----------------
 @app.post("/api/complaints/submit")
 def submit_complaint(
     user_id: int = Form(...),
     username: str = Form(...),
     category: str = Form("General Feedback"),
-    message: str = Form(...)
+    message: str = Form(...),
+    image_proof: str = Form(None)
 ):
     msg = message.strip()
     if not msg:
         return JSONResponse({"status": "error", "message": "Message cannot be empty."}, status_code=400)
 
+    img_data = image_proof if (image_proof and len(image_proof.strip()) > 50) else None
+
     conn = get_db()
     cur = conn.cursor()
     try:
         cur.execute(
-            "INSERT INTO complaints (user_id, username, category, message) VALUES (?, ?, ?, ?)",
-            (user_id, username, category, msg)
+            "INSERT INTO complaints (user_id, username, category, message, image_proof) VALUES (?, ?, ?, ?, ?)",
+            (user_id, username, category, msg, img_data)
         )
         conn.commit()
-        return JSONResponse({"status": "ok", "message": "Feedback submitted successfully."})
+        return JSONResponse({"status": "ok", "message": "Feedback submitted successfully with visual artifact."})
     finally:
         conn.close()
 
-# ----------------- DEDICATED OWNER DATA API -----------------
+# ----------------- BULLETPROOF OWNER TELEMETRY API -----------------
 @app.get("/api/owner/telemetry")
-def get_owner_telemetry(user_id: int):
+def get_owner_telemetry(user_id: int = 0, username: str = ""):
     conn = get_db()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT username, role FROM users WHERE id = ?", (user_id,))
-        row = cur.fetchone()
-        if not row or (row[0].lower() != OWNER_USERNAME.lower() and row[1] != "owner"):
-            return JSONResponse({"status": "error", "message": "Unauthorized access to Owner Telemetry."}, status_code=403)
+        is_owner = False
 
-        # 1. Total Visits
+        # 1. Primary Check by User ID
+        if user_id and user_id > 0:
+            cur.execute("SELECT id, username, role FROM users WHERE id = ?", (user_id,))
+            row = cur.fetchone()
+            if row:
+                if row[1].lower() == OWNER_USERNAME.lower() or row[2] == "owner":
+                    is_owner = True
+                    if row[2] != "owner":
+                        cur.execute("UPDATE users SET role = 'owner' WHERE id = ?", (row[0],))
+                        conn.commit()
+
+        # 2. Secondary Safe Fallback Check by Username
+        if not is_owner and username:
+            if username.strip().lower() == OWNER_USERNAME.lower():
+                cur.execute("SELECT id FROM users WHERE lower(username) = ?", (OWNER_USERNAME.lower(),))
+                u_row = cur.fetchone()
+                if u_row:
+                    cur.execute("UPDATE users SET role = 'owner' WHERE id = ?", (u_row[0],))
+                    conn.commit()
+                is_owner = True
+
+        if not is_owner:
+            return JSONResponse({"status": "error", "message": "Unauthorized access to Sovereign Telemetry."}, status_code=403)
+
+        # Total Visits
         cur.execute("SELECT value FROM site_stats WHERE key = 'total_visits'")
-        total_visits = cur.fetchone()[0]
+        v_row = cur.fetchone()
+        total_visits = v_row[0] if v_row else 0
 
-        # 2. Registered Users & Online status (active within last 5 minutes)
+        # Registered Users
         cur.execute("SELECT id, username, role, last_active, created_at FROM users ORDER BY id DESC")
         users_raw = cur.fetchall()
-        
-        # 3. Calculate Online Users count
-        cur.execute("SELECT COUNT(*) FROM users WHERE datetime(last_active) >= datetime('now', '-5 minutes')")
+
+        # Online Users (active in last 10 mins)
+        cur.execute("SELECT COUNT(*) FROM users WHERE datetime(last_active) >= datetime('now', '-10 minutes')")
         online_count = cur.fetchone()[0]
 
         users_list = []
@@ -396,15 +430,24 @@ def get_owner_telemetry(user_id: int):
                 "created_at": u[4]
             })
 
-        # 4. Complaints
-        cur.execute("SELECT id, username, category, message, created_at FROM complaints ORDER BY id DESC")
-        complaints_list = [{"id": r[0], "username": r[1], "category": r[2], "message": r[3], "created_at": r[4]} for r in cur.fetchall()]
+        # Complaints with Image Proof
+        cur.execute("SELECT id, username, category, message, image_proof, created_at FROM complaints ORDER BY id DESC")
+        complaints_list = [
+            {
+                "id": r[0],
+                "username": r[1],
+                "category": r[2],
+                "message": r[3],
+                "image_proof": r[4],
+                "created_at": r[5]
+            }
+            for r in cur.fetchall()
+        ]
 
-        # 5. Core Mode Usage Distribution
+        # Core Mode Distribution
         cur.execute("SELECT core_mode, COUNT(*) FROM sessions GROUP BY core_mode")
         core_dist = {r[0]: r[1] for r in cur.fetchall()}
 
-        # 6. Total messages
         cur.execute("SELECT COUNT(*) FROM messages")
         total_messages = cur.fetchone()[0]
 
@@ -573,7 +616,7 @@ async def read_aloud(text: str = Form(...)):
     return JSONResponse({"audio_base64": f"data:audio/mp3;base64,{audio_b64}"})
 
 # =====================================================================
-# 🛡️ DEDICATED OWNER COMMAND INTERFACE ROUTE: /owner
+# 🛡️ DEDICATED OWNER COMMAND INTERFACE: /owner
 # =====================================================================
 @app.get("/owner", response_class=HTMLResponse)
 async def serve_owner_dashboard():
@@ -594,12 +637,10 @@ async def serve_owner_dashboard():
                 --card-border: rgba(255, 255, 255, 0.08);
                 --text-high: #f8fafc;
                 --text-muted: #94a3b8;
-                --green: #22c55e;
             }
             * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', sans-serif; }
             body { background: radial-gradient(circle at 50% 0%, #151b3d 0%, var(--bg-deep) 85%); color: var(--text-high); min-height: 100vh; display: flex; flex-direction: column; }
             
-            /* 14px Heavy Solid Hitbox Scrollbar */
             ::-webkit-scrollbar { width: 14px; height: 14px; }
             ::-webkit-scrollbar-track { background: rgba(12, 16, 28, 0.75); border-left: 1px solid rgba(255, 255, 255, 0.06); }
             ::-webkit-scrollbar-thumb { background: linear-gradient(180deg, #facc15 0%, #ca8a04 100%); border-radius: 8px; border: 3px solid rgba(12, 16, 28, 0.85); }
@@ -617,7 +658,6 @@ async def serve_owner_dashboard():
 
             .container { padding: 28px; max-width: 1300px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; }
 
-            /* Metrics Grid */
             .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 16px; }
             .metric-card {
                 background: var(--card); border: 1px solid var(--card-border); border-radius: 20px; padding: 20px;
@@ -628,8 +668,7 @@ async def serve_owner_dashboard():
             .metric-value { font-size: 32px; font-weight: 800; font-family: 'Space Grotesk', sans-serif; color: #fff; }
             .metric-tag { font-size: 11px; color: #fde047; margin-top: 6px; font-weight: 600; }
 
-            /* Grid for Users, Complaints, Cores */
-            .sections-split { display: grid; grid-template-columns: 1.4fr 1fr; gap: 20px; }
+            .sections-split { display: grid; grid-template-columns: 1.3fr 1fr; gap: 20px; }
             @media (max-width: 900px) { .sections-split { grid-template-columns: 1fr; } }
 
             .panel {
@@ -653,28 +692,32 @@ async def serve_owner_dashboard():
 
             .complaint-box {
                 background: rgba(20, 28, 48, 0.6); border: 1px solid var(--card-border); border-radius: 14px;
-                padding: 14px; display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px;
+                padding: 14px; display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px;
             }
             .complaint-top { display: flex; justify-content: space-between; align-items: center; }
             .badge-cat { font-size: 10px; background: rgba(250, 204, 21, 0.15); color: #fde047; padding: 2px 7px; border-radius: 6px; font-weight: 700; }
+            .trouble-thumb {
+                max-width: 180px; max-height: 120px; border-radius: 8px; border: 1px solid rgba(250, 204, 21, 0.3);
+                cursor: pointer; object-fit: cover; margin-top: 6px; display: block;
+            }
 
             .core-chip-grid { display: flex; flex-wrap: wrap; gap: 8px; }
             .core-chip { background: rgba(255,255,255,0.05); border: 1px solid var(--card-border); padding: 8px 12px; border-radius: 10px; font-size: 12px; display: flex; align-items: center; gap: 6px; }
             .core-chip b { color: #facc15; font-family: 'Space Grotesk', sans-serif; }
 
-            .auth-modal { position: fixed; inset: 0; background: rgba(4,6,12,0.96); backdrop-filter: blur(25px); display: flex; align-items: center; justify-content: center; z-index: 500; }
+            .auth-modal { position: fixed; inset: 0; background: rgba(4,6,12,0.96); backdrop-filter: blur(25px); display: none; align-items: center; justify-content: center; z-index: 500; }
             .auth-box { background: #0c1222; border: 1px solid rgba(250,204,21,0.3); border-radius: 24px; padding: 32px; width: 90%; max-width: 380px; text-align: center; }
             .auth-btn { width: 100%; background: linear-gradient(135deg, #facc15, #f59e0b); border: none; border-radius: 12px; padding: 12px; color: #000; font-weight: 700; cursor: pointer; margin-top: 10px; }
         </style>
     </head>
     <body>
-        <!-- OWNER GATEWAY MODAL -->
+        <!-- OWNER GATEWAY MODAL (SHOWN ONLY IF UNAUTH) -->
         <div class="auth-modal" id="ownerGate">
             <div class="auth-box">
                 <div style="font-size:36px; margin-bottom:8px;">🛡️</div>
                 <h2 style="font-family:'Space Grotesk'; font-size:20px; margin-bottom:6px;">Owner Verification</h2>
-                <p style="font-size:12px; color:var(--text-muted); margin-bottom:16px;">Restricted to <b>Utkarsh Bandhu</b>. Enter credentials to unlock sovereign command center.</p>
-                <input type="text" id="ownerUserInput" class="search-input" placeholder="Owner Username" />
+                <p style="font-size:12px; color:var(--text-muted); margin-bottom:16px;">Restricted to <b>Utkarsh Bandhu</b>. Enter password to unlock.</p>
+                <input type="text" id="ownerUserInput" class="search-input" value="utkarsh" placeholder="Username" />
                 <input type="password" id="ownerPassInput" class="search-input" placeholder="Password" />
                 <button class="auth-btn" onclick="verifyOwnerAccess()">Unlock Telemetry</button>
                 <div id="gateErr" style="color:#f87171; font-size:12px; margin-top:10px; display:none;">Access Denied.</div>
@@ -698,7 +741,6 @@ async def serve_owner_dashboard():
 
         <!-- DASHBOARD CONTAINER -->
         <main class="container">
-            <!-- 4 Core Metrics Cards -->
             <div class="metrics-grid">
                 <div class="metric-card">
                     <div class="metric-title">Total Website Visits</div>
@@ -713,12 +755,12 @@ async def serve_owner_dashboard():
                 <div class="metric-card">
                     <div class="metric-title">Live Active Users</div>
                     <div class="metric-value" id="valOnline" style="color:#4ade80;">0</div>
-                    <div class="metric-tag">● Active in last 5 mins</div>
+                    <div class="metric-tag">● Active in last 10 mins</div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-title">Complaints & Reports</div>
+                    <div class="metric-title">Complaints & Bug Reports</div>
                     <div class="metric-value" id="valComplaints" style="color:#f87171;">0</div>
-                    <div class="metric-tag">● User Feedback Queue</div>
+                    <div class="metric-tag">● With Trouble Photos</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-title">Total Conversations</div>
@@ -735,7 +777,7 @@ async def serve_owner_dashboard():
                 <div class="core-chip-grid" id="coreUsageGrid">Loading chamber stats...</div>
             </div>
 
-            <!-- Split Section: Users Table & Complaints List -->
+            <!-- Split Section: Users Table & Complaints with Photos -->
             <div class="sections-split">
                 <!-- User Registry -->
                 <div class="panel">
@@ -765,40 +807,25 @@ async def serve_owner_dashboard():
                 <!-- Complaints & Issue Feedback Queue -->
                 <div class="panel">
                     <div class="panel-header">
-                        <div class="panel-title">🚨 Complaints & Bug Feed</div>
+                        <div class="panel-title">🚨 Complaints & Bug Feed (With Photos)</div>
                         <button onclick="loadTelemetry()" style="background:none; border:none; color:var(--gold); font-size:12px; cursor:pointer;">↻ Refresh</button>
                     </div>
                     <div class="table-container" id="complaintsList">
-                        Loading complaints...
+                        Loading reports...
                     </div>
                 </div>
             </div>
         </main>
 
         <script>
-            let ownerId = localStorage.getItem("lemon_user_id");
-            let ownerUser = localStorage.getItem("lemon_username");
+            let ownerId = localStorage.getItem("lemon_user_id") || "0";
+            let ownerUser = localStorage.getItem("lemon_username") || "utkarsh";
             let fullUsersData = [];
-
-            function checkInitialGate() {
-                if (ownerUser && ownerUser.toLowerCase() === "utkarsh" && ownerId) {
-                    document.getElementById("ownerGate").style.display = "none";
-                    loadTelemetry();
-                } else {
-                    document.getElementById("ownerGate").style.display = "flex";
-                }
-            }
 
             async function verifyOwnerAccess() {
                 const u = document.getElementById("ownerUserInput").value.trim().toLowerCase();
                 const p = document.getElementById("ownerPassInput").value.trim();
                 const err = document.getElementById("gateErr");
-                
-                if (u !== "utkarsh") {
-                    err.innerText = "Only username 'utkarsh' is authorized.";
-                    err.style.display = "block";
-                    return;
-                }
 
                 const fd = new FormData();
                 fd.append("username", u);
@@ -825,16 +852,16 @@ async def serve_owner_dashboard():
             }
 
             async function loadTelemetry() {
-                if (!ownerId) return;
                 try {
-                    const res = await fetch(`/api/owner/telemetry?user_id=${ownerId}`);
+                    const res = await fetch(`/api/owner/telemetry?user_id=${ownerId}&username=utkarsh`);
                     const d = await res.json();
+                    
                     if (d.status !== "ok") {
-                        alert("Unauthorized.");
-                        location.href = "/";
+                        document.getElementById("ownerGate").style.display = "flex";
                         return;
                     }
 
+                    document.getElementById("ownerGate").style.display = "none";
                     document.getElementById("valVisits").innerText = d.total_visits;
                     document.getElementById("valUsers").innerText = d.total_users;
                     document.getElementById("valOnline").innerText = d.online_users;
@@ -851,14 +878,14 @@ async def serve_owner_dashboard():
                             </div>
                         `).join("");
                     } else {
-                        coreBox.innerHTML = "No core usage recorded yet.";
+                        coreBox.innerHTML = "No chamber usage recorded yet.";
                     }
 
                     // Render Users Table
                     fullUsersData = d.users || [];
                     renderUsersTable(fullUsersData);
 
-                    // Render Complaints
+                    // Render Complaints with Photo Support
                     const cBox = document.getElementById("complaintsList");
                     if (d.complaints && d.complaints.length > 0) {
                         cBox.innerHTML = d.complaints.map(c => `
@@ -867,12 +894,20 @@ async def serve_owner_dashboard():
                                     <b style="color:#fde047;">${c.username}</b>
                                     <span class="badge-cat">${c.category}</span>
                                 </div>
-                                <div style="font-size:12.5px; color:#e2e8f0; margin-top:4px;">${c.message}</div>
+                                <div style="font-size:12.5px; color:#e2e8f0; margin-top:2px;">${c.message}</div>
+                                ${c.image_proof ? `
+                                    <div style="margin-top:6px;">
+                                        <a href="${c.image_proof}" target="_blank" title="Click to view full photo">
+                                            <img src="${c.image_proof}" class="trouble-thumb" alt="Trouble photo">
+                                        </a>
+                                        <span style="font-size:10px; color:#94a3b8;">📷 Click thumbnail to inspect full resolution</span>
+                                    </div>
+                                ` : ''}
                                 <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">${c.created_at}</div>
                             </div>
                         `).join("");
                     } else {
-                        cBox.innerHTML = "<div style='font-size:12px; color:var(--text-muted); padding:10px;'>No pending complaints.</div>";
+                        cBox.innerHTML = "<div style='font-size:12px; color:var(--text-muted); padding:10px;'>No pending reports.</div>";
                     }
                 } catch(e) {
                     console.error("Telemetry error:", e);
@@ -903,16 +938,15 @@ async def serve_owner_dashboard():
                 renderUsersTable(filtered);
             }
 
-            // Auto-refresh telemetry every 20 seconds
-            setInterval(loadTelemetry, 20000);
-            checkInitialGate();
+            setInterval(loadTelemetry, 25000);
+            loadTelemetry();
         </script>
     </body>
     </html>
     """
 
 # =====================================================================
-# 🌐 MAIN USER INTERFACE ROUTE: /
+# 🌐 MAIN USER INTERFACE: /
 # =====================================================================
 @app.get("/", response_class=HTMLResponse)
 async def serve_app():
@@ -960,7 +994,7 @@ async def serve_app():
             }
             .modal-card {
                 background: var(--card-surface); border: 1px solid var(--card-border); border-radius: 24px;
-                padding: 30px 26px; width: 90%; max-width: 420px; box-shadow: 0 10px 40px rgba(0,0,0,0.85);
+                padding: 30px 26px; width: 90%; max-width: 440px; box-shadow: 0 10px 40px rgba(0,0,0,0.85);
             }
             .modal-card h2 { font-size: 20px; font-weight: 700; margin-bottom: 6px; font-family: 'Space Grotesk', sans-serif; }
             .modal-card p { font-size: 13px; color: var(--text-muted); margin-bottom: 16px; line-height: 1.4; }
@@ -968,7 +1002,7 @@ async def serve_app():
                 width: 100%; background: rgba(30, 41, 59, 0.8); border: 1px solid var(--card-border);
                 border-radius: 14px; padding: 12px 14px; color: #fff; font-size: 14px; margin-bottom: 12px; outline: none;
             }
-            .styled-textarea { height: 90px; resize: none; }
+            .styled-textarea { height: 85px; resize: none; }
             .styled-input:focus, .styled-textarea:focus { border-color: var(--primary); }
             .action-submit-btn {
                 width: 100%; background: linear-gradient(135deg, #facc15, #f59e0b); border: none; border-radius: 14px;
@@ -978,6 +1012,14 @@ async def serve_app():
                 display: none; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4);
                 color: #fca5a5; font-size: 12.5px; padding: 8px 12px; border-radius: 10px; margin-bottom: 12px;
             }
+
+            /* Report Proof Preview */
+            .proof-preview-bar {
+                display: none; align-items: center; justify-content: space-between; padding: 6px 12px;
+                background: rgba(30, 41, 59, 0.6); border: 1px solid rgba(250, 204, 21, 0.3); border-radius: 12px; margin-bottom: 12px;
+            }
+            .proof-preview-bar img { width: 36px; height: 36px; border-radius: 8px; object-fit: cover; }
+            .proof-remove { color: #f87171; cursor: pointer; font-size: 13px; font-weight: 700; }
 
             .header {
                 padding: 12px 18px; display: flex; align-items: center; justify-content: space-between;
@@ -1203,20 +1245,36 @@ async def serve_app():
             </div>
         </div>
 
-        <!-- USER FEEDBACK / COMPLAINT MODAL -->
+        <!-- USER FEEDBACK / COMPLAINT MODAL (WITH PHOTO ATTACHMENT) -->
         <div class="overlay-modal" id="feedbackModal">
             <div class="modal-card">
                 <h2>💬 Report Issue / Feedback</h2>
-                <p>Submit bugs, suggestions, or complaints directly to Utkarsh.</p>
+                <p>Submit bugs, errors, or feedback directly to Utkarsh Bandhu.</p>
                 <select id="feedbackCategory" class="styled-select">
-                    <option value="Bug / Error">Bug / App Crash</option>
-                    <option value="Vision Problem">Camera / Vision Issue</option>
-                    <option value="Feature Request">New Feature Idea</option>
-                    <option value="General Feedback">General Thoughts</option>
+                    <option value="Bug / Error">Bug / App Error</option>
+                    <option value="Vision Problem">Camera / Vision Mistake</option>
+                    <option value="Voice Synthesis">Voice / Audio Issue</option>
+                    <option value="General Feedback">General Feedback</option>
                 </select>
-                <textarea id="feedbackMessage" class="styled-textarea" placeholder="Explain the problem or request clearly..."></textarea>
+                <textarea id="feedbackMessage" class="styled-textarea" placeholder="Explain the trouble or issue in detail..."></textarea>
+                
+                <!-- Trouble Photo Preview Bar -->
+                <div class="proof-preview-bar" id="reportProofBar">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <img id="reportProofThumb" src="" alt="trouble proof">
+                        <span style="font-size:12px; color:#facc15;">Photo Attached</span>
+                    </div>
+                    <span class="proof-remove" onclick="clearReportPhoto()">✕ Remove</span>
+                </div>
+
+                <!-- Attach Photo Button -->
+                <label class="action-submit-btn" style="display:flex; align-items:center; justify-content:center; gap:6px; background:rgba(255,255,255,0.08); color:#fde047; margin-bottom:12px; cursor:pointer; font-size:13px; padding:10px;">
+                    <span>📷 Attach Photo of Trouble</span>
+                    <input type="file" id="reportPhotoInput" accept="image/*" style="display:none;" onchange="handleReportPhotoUpload(event)">
+                </label>
+
                 <div style="display:flex; gap:10px;">
-                    <button class="action-submit-btn" onclick="sendComplaint()">Submit</button>
+                    <button class="action-submit-btn" onclick="sendComplaint()">Submit Report</button>
                     <button class="action-submit-btn" style="background:rgba(255,255,255,0.08); color:#fff;" onclick="closeFeedbackModal()">Cancel</button>
                 </div>
             </div>
@@ -1320,6 +1378,7 @@ async def serve_app():
             let currentThinkingEl = null;
 
             let attachedImageBase64 = null;
+            let reportPhotoBase64 = null;
             let cameraStream = null;
 
             const authModal = document.getElementById("authModal");
@@ -1330,6 +1389,8 @@ async def serve_app():
             const authToggleText = document.getElementById("authToggleText");
 
             const feedbackModal = document.getElementById("feedbackModal");
+            const reportProofBar = document.getElementById("reportProofBar");
+            const reportProofThumb = document.getElementById("reportProofThumb");
             const ownerMenuBtn = document.getElementById("ownerMenuBtn");
 
             const sidebar = document.getElementById("sidebar");
@@ -1352,7 +1413,6 @@ async def serve_app():
             const imgPreviewBar = document.getElementById("imgPreviewBar");
             const imgPreviewThumb = document.getElementById("imgPreviewThumb");
 
-            // Heartbeat to mark active online status
             function sendHeartbeat() {
                 if (currentUserId) {
                     const fd = new FormData();
@@ -1363,23 +1423,49 @@ async def serve_app():
             setInterval(sendHeartbeat, 60000);
 
             function openFeedbackModal() { closeSidebar(); feedbackModal.style.display = "flex"; }
-            function closeFeedbackModal() { feedbackModal.style.display = "none"; document.getElementById("feedbackMessage").value = ""; }
+            function closeFeedbackModal() {
+                feedbackModal.style.display = "none";
+                document.getElementById("feedbackMessage").value = "";
+                clearReportPhoto();
+            }
+
+            function handleReportPhotoUpload(e) {
+                const file = e.target.files[0];
+                if (!file) return;
+                const r = new FileReader();
+                r.onload = async (event) => {
+                    reportPhotoBase64 = await resizeImage(event.target.result, 800, 800, 0.75);
+                    reportProofThumb.src = reportPhotoBase64;
+                    reportProofBar.style.display = "flex";
+                };
+                r.readAsDataURL(file);
+            }
+
+            function clearReportPhoto() {
+                reportPhotoBase64 = null;
+                reportProofBar.style.display = "none";
+                document.getElementById("reportPhotoInput").value = "";
+            }
+
             async function sendComplaint() {
                 const cat = document.getElementById("feedbackCategory").value;
                 const msg = document.getElementById("feedbackMessage").value.trim();
-                if (!msg) return alert("Please enter message.");
+                if (!msg) return alert("Please enter trouble details.");
 
                 const fd = new FormData();
                 fd.append("user_id", currentUserId || 0);
                 fd.append("username", currentUsername || "Anonymous");
                 fd.append("category", cat);
                 fd.append("message", msg);
+                if (reportPhotoBase64) {
+                    fd.append("image_proof", reportPhotoBase64);
+                }
 
                 try {
                     const res = await fetch("/api/complaints/submit", { method: "POST", body: fd });
                     const d = await res.json();
                     if (d.status === "ok") {
-                        alert("Your feedback has been delivered to Utkarsh.");
+                        alert("Thank you! Your issue and photo report were delivered directly to Utkarsh.");
                         closeFeedbackModal();
                     } else {
                         alert(d.message || "Failed.");
