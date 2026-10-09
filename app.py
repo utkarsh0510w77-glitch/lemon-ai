@@ -8,6 +8,7 @@ import datetime
 import io
 import time
 import random
+import secrets
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -31,41 +32,39 @@ try:
 except ImportError:
     POSTGRES_AVAILABLE = False
 
-PART1 = "gsk_HFaYhV1dR0lldEmL2zkAWGdy"
-PART2 = "b3FYnQHV93Lkgjmz4CtDJ1IpMfy4"
-
-GROQ_API_KEY = os.getenv("GROQ_API_KEY") or (PART1 + PART2)
-client = Groq(api_key=GROQ_API_KEY)
+# Set GROQ_API_KEY in the deployment environment. Never commit API keys.
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
 OWNER_USERNAME = "utkarsh"
 OWNER_EMAIL = "utkarsh0510w77@gmail.com"
 
 # Password spaces auto-stripped
-HARDCODED_APP_PASS = "tldphoyzneluvzex"
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", 465))
+SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
 SMTP_USER = os.getenv("SMTP_USER", OWNER_EMAIL)
-SMTP_PASS = os.getenv("SMTP_PASS", HARDCODED_APP_PASS).replace(" ", "").strip()
+SMTP_PASS = os.getenv("SMTP_PASS", "").replace(" ", "").strip()
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://lemon_db_7jr5_user:fCnr4Ag4rcayvFbgZcxeRW02ROKFnm8A@dpg-db4e0i3l550s73besfpg-a.oregon-postgres.render.com/lemon_db_7jr5"
-)
+# If DATABASE_URL is absent, the app deliberately uses local SQLite.
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 
 app = FastAPI(title="Lemon AI - Sovereign Edition")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 OTP_STORE = {}
+OWNER_SESSIONS = {}
 
 def send_otp_email(to_email: str, otp: str) -> tuple[bool, str]:
-    target_pass = SMTP_PASS or HARDCODED_APP_PASS
+    target_pass = SMTP_PASS
+    if not SMTP_USER or not target_pass:
+        return False, "SMTP_USER and SMTP_PASS must be configured in environment variables."
     try:
         msg = MIMEMultipart("alternative")
         msg["Subject"] = f"🍋 Lemon Sovereign Key: {otp}"
@@ -297,18 +296,16 @@ def request_owner_otp(email: str = Form(...)):
     if sent:
         return JSONResponse({"status": "ok", "message": f"Live OTP sent to {email_clean}!"})
     else:
-        return JSONResponse({
-            "status": "ok",
-            "message": f"Dispatched with fallback ({msg[:40]}...). Master key: 778899 active."
-        })
+        OTP_STORE.pop(email_clean, None)
+        return JSONResponse(
+            {"status": "error", "message": "OTP email could not be sent. Check SMTP configuration and try again."},
+            status_code=503
+        )
 
 @app.post("/api/owner/verify-otp")
 def verify_owner_otp(email: str = Form(...), otp: str = Form(...)):
     email_clean = email.strip().lower()
     otp_clean = otp.strip()
-
-    if otp_clean == "778899":
-        return JSONResponse({"status": "ok", "token": "SOVEREIGN_AUTH_UTKARSH_OK", "username": OWNER_USERNAME})
 
     record = OTP_STORE.get(email_clean)
     if not record:
@@ -322,7 +319,9 @@ def verify_owner_otp(email: str = Form(...), otp: str = Form(...)):
         return JSONResponse({"status": "error", "message": "Incorrect OTP code."}, status_code=401)
 
     OTP_STORE.pop(email_clean, None)
-    return JSONResponse({"status": "ok", "token": "SOVEREIGN_AUTH_UTKARSH_OK", "username": OWNER_USERNAME})
+    token = secrets.token_urlsafe(32)
+    OWNER_SESSIONS[token] = time.time() + 3600
+    return JSONResponse({"status": "ok", "token": token, "username": OWNER_USERNAME})
 
 # ----------------- AUTH, AVATARS & SESSIONS -----------------
 @app.post("/api/register")
@@ -335,15 +334,15 @@ def register_user(username: str = Form(...), password: str = Form(...), avatar: 
     cur = conn.cursor()
     try:
         pwd_hash = hash_password(password)
-        user_role = "owner" if username == OWNER_USERNAME.lower() else "user"
+        # Public registration must never grant the owner role.
         if engine == "postgres":
-            cur.execute("INSERT INTO users (username, password_hash, role, avatar) VALUES (%s, %s, %s, %s) RETURNING id", (username, pwd_hash, user_role, avatar))
+            cur.execute("INSERT INTO users (username, password_hash, role, avatar) VALUES (%s, %s, %s, %s) RETURNING id", (username, pwd_hash, "user", avatar))
             user_id = cur.fetchone()[0]
         else:
-            cur.execute("INSERT INTO users (username, password_hash, role, avatar) VALUES (?, ?, ?, ?)", (username, pwd_hash, user_role, avatar))
+            cur.execute("INSERT INTO users (username, password_hash, role, avatar) VALUES (?, ?, ?, ?)", (username, pwd_hash, "user", avatar))
             user_id = cur.lastrowid
         conn.commit()
-        return JSONResponse({"status": "ok", "user_id": user_id, "username": username, "role": user_role, "avatar": avatar})
+        return JSONResponse({"status": "ok", "user_id": user_id, "username": username, "role": "user", "avatar": avatar})
     except Exception as e:
         if "unique" in str(e).lower():
             return JSONResponse({"status": "error", "message": "Username already taken."}, status_code=400)
@@ -363,8 +362,7 @@ def login_user(username: str = Form(...), password: str = Form(...)):
         cur.execute(sql, (username, pwd_hash))
         user = cur.fetchone()
         if user:
-            user_role = "owner" if username == OWNER_USERNAME.lower() else user[2]
-            return JSONResponse({"status": "ok", "user_id": user[0], "username": user[1], "role": user_role, "avatar": user[3] or "⚡"})
+            return JSONResponse({"status": "ok", "user_id": user[0], "username": user[1], "role": user[2], "avatar": user[3] or "⚡"})
         return JSONResponse({"status": "error", "message": "Invalid credentials."}, status_code=401)
     finally:
         conn.close()
@@ -420,7 +418,7 @@ def new_core_session(user_id: int = Form(...), core_mode: str = Form(...)):
             cur.execute("INSERT INTO sessions (user_id, title, core_mode) VALUES (%s, %s, %s) RETURNING id", (user_id, title, core_mode))
             session_id = cur.fetchone()[0]
         else:
-            cur.execute("INSERT INTO sessions (user_id, title, core_mode) VALUES (?, ?, ?)", (user_id, title, core_mode))
+            cur.execute("INSERT INTO sessions (user_id, title, core_mode) VALUES (?, ?, ?)", (user_id, title, mode))
             session_id = cur.lastrowid
         conn.commit()
         return JSONResponse({"status": "ok", "session_id": session_id, "title": title, "core_mode": core_mode})
@@ -466,6 +464,10 @@ async def parse_doc(file: UploadFile = File(...)):
 # ----------------- OWNER TELEMETRY -----------------
 @app.get("/api/owner/telemetry")
 def get_owner_telemetry(token: str = ""):
+    expiry = OWNER_SESSIONS.get(token)
+    if not token or not expiry or time.time() > expiry:
+        OWNER_SESSIONS.pop(token, None)
+        return JSONResponse({"status": "error", "message": "Authentication required."}, status_code=401)
     conn, engine = DBManager.get_conn()
     cur = conn.cursor()
     try:
@@ -538,12 +540,16 @@ def handle_conversation(user_id: int, session_id: int, query: str, mode: str, im
                 cur.execute("INSERT INTO sessions (user_id, title, core_mode) VALUES (%s, %s, %s) RETURNING id", (user_id, title, mode))
                 session_id = cur.fetchone()[0]
             else:
-                cur.execute("INSERT INTO sessions (user_id, title, core_mode) VALUES (?, ?, ?)", (user_id, title, core_mode))
+                cur.execute("INSERT INTO sessions (user_id, title, core_mode) VALUES (?, ?, ?)", (user_id, title, mode))
                 session_id = cur.lastrowid
             conn.commit()
         else:
-            s_check = "SELECT title, core_mode FROM sessions WHERE id = %s" if engine == "postgres" else "SELECT title, core_mode FROM sessions WHERE id = ?"
-            cur.execute(s_check, (session_id,))
+            s_check = (
+                "SELECT title, core_mode FROM sessions WHERE id = %s AND user_id = %s"
+                if engine == "postgres"
+                else "SELECT title, core_mode FROM sessions WHERE id = ? AND user_id = ?"
+            )
+            cur.execute(s_check, (session_id, user_id))
             row = cur.fetchone()
             if row:
                 title, mode = row[0], row[1]
@@ -553,7 +559,7 @@ def handle_conversation(user_id: int, session_id: int, query: str, mode: str, im
                     cur.execute("INSERT INTO sessions (user_id, title, core_mode) VALUES (%s, %s, %s) RETURNING id", (user_id, title, mode))
                     session_id = cur.fetchone()[0]
                 else:
-                    cur.execute("INSERT INTO sessions (user_id, title, core_mode) VALUES (?, ?, ?)", (user_id, title, core_mode))
+                    cur.execute("INSERT INTO sessions (user_id, title, core_mode) VALUES (?, ?, ?)", (user_id, title, mode))
                     session_id = cur.lastrowid
                 conn.commit()
 
@@ -718,7 +724,7 @@ async def serve_owner_dashboard():
                 <button class="action-btn" id="reqOtpBtn" onclick="requestOtp()">📩 Send OTP to My Gmail</button>
 
                 <div id="otpInputArea" style="display:none; margin-top:14px;">
-                    <input type="text" id="otpCodeInput" class="search-input" placeholder="6-digit OTP (or bypass 778899)" maxlength="6" style="text-align:center; font-size:18px; letter-spacing:4px;" />
+                    <input type="text" id="otpCodeInput" class="search-input" placeholder="Enter the 6-digit OTP" maxlength="6" style="text-align:center; font-size:18px; letter-spacing:4px;" />
                     <button class="action-btn" onclick="verifyOtp()">Unlock Sovereign Console</button>
                 </div>
                 <div id="otpErrMsg" style="color:#f87171; font-size:12px; margin-top:10px; display:none;"></div>
@@ -864,6 +870,7 @@ async def serve_app():
         <title>Lemon AI | Sovereign Mind & Cockpit</title>
         <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
         <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
         <style>
             :root {
                 --gold: #facc15;
@@ -1177,6 +1184,8 @@ async def serve_app():
             let currentAvatar = localStorage.getItem("lemon_user_avatar") || "⚡";
             let attachedImageBase64 = null;
             let cameraStream = null;
+            let mediaRecorder = null;
+            let recordedChunks = [];
 
             const chatStream = document.getElementById("chatStream");
             const textInput = document.getElementById("textInput");
@@ -1214,6 +1223,71 @@ async def serve_app():
             }
             audioElement.onplay = () => { stopBtn.style.display = "flex"; };
             audioElement.onended = () => { stopBtn.style.display = "none"; };
+
+
+            async function requestMicAndRecord() {
+                const micBtn = document.getElementById("micBtn");
+                if (mediaRecorder && mediaRecorder.state === "recording") {
+                    mediaRecorder.stop();
+                    micBtn.innerText = "🎙️";
+                    dockStatus.innerText = "● Processing voice...";
+                    return;
+                }
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) {
+                    dockStatus.innerText = "Microphone recording is not supported by this browser.";
+                    return;
+                }
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    recordedChunks = [];
+                    mediaRecorder = new MediaRecorder(stream);
+                    mediaRecorder.ondataavailable = (event) => {
+                        if (event.data && event.data.size > 0) recordedChunks.push(event.data);
+                    };
+                    mediaRecorder.onerror = () => {
+                        stream.getTracks().forEach(track => track.stop());
+                        micBtn.innerText = "🎙️";
+                        dockStatus.innerText = "Microphone recording failed.";
+                    };
+                    mediaRecorder.onstop = async () => {
+                        stream.getTracks().forEach(track => track.stop());
+                        const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || "audio/webm" });
+                        if (!blob.size) {
+                            dockStatus.innerText = "No audio captured. Try again.";
+                            return;
+                        }
+                        const fd = new FormData();
+                        fd.append("file", blob, "voice.webm");
+                        fd.append("user_id", currentUserId);
+                        fd.append("session_id", String(currentSessionId));
+                        fd.append("mode", currentCoreMode);
+                        try {
+                            const response = await fetch("/voice-process", { method: "POST", body: fd });
+                            const result = await response.json();
+                            if (!response.ok) throw new Error(result.detail || result.message || "Voice request failed");
+                            document.getElementById("heroGreeting").style.display = "none";
+                            appendMessage("user", result.user_text || "[Voice message]", null);
+                            appendMessage("lemon", result.reply_text || "I could not generate a response.", result.emotion);
+                            if (result.session_id) {
+                                currentSessionId = result.session_id;
+                                localStorage.setItem("lemon_current_session_id", String(currentSessionId));
+                            }
+                            if (result.audio_base64) {
+                                audioElement.src = result.audio_base64;
+                                audioElement.play().catch(() => {});
+                            }
+                            dockStatus.innerText = "● Ready";
+                        } catch (error) {
+                            dockStatus.innerText = "Voice processing failed. Check server logs and try again.";
+                        }
+                    };
+                    mediaRecorder.start();
+                    micBtn.innerText = "⏹";
+                    dockStatus.innerText = "● Recording… press ⏹ to finish.";
+                } catch (error) {
+                    dockStatus.innerText = "Microphone access denied or unavailable.";
+                }
+            }
 
             async function requestCameraAccess() {
                 dockStatus.innerText = "● Initializing optical sensor...";
@@ -1326,17 +1400,32 @@ async def serve_app():
 
             function appendMessage(sender, text, emotion, img) {
                 const grp = document.createElement("div");
-                grp.className = `bubble-group ${sender}`;
-                let imgTag = img ? `<img src="${img}" class="chat-img-thumb">` : "";
-                let emoTag = emotion ? `<span style="font-size:10px; font-weight:800; color:var(--gold); text-transform:uppercase;">● ${emotion}</span><br>` : "";
+                grp.className = `bubble-group ${sender === "lemon" ? "lemon" : "user"}`;
+                const bubble = document.createElement("div");
+                bubble.className = `bubble ${sender === "lemon" ? "lemon" : "user"}`;
 
-                grp.innerHTML = `
-                    <div class="bubble ${sender}">
-                        ${emoTag}
-                        ${imgTag}
-                        <div>${sender === 'lemon' ? marked.parse(text) : text}</div>
-                    </div>
-                `;
+                if (emotion) {
+                    const tag = document.createElement("span");
+                    tag.style.cssText = "font-size:10px;font-weight:800;color:var(--gold);text-transform:uppercase;";
+                    tag.textContent = `● ${String(emotion).slice(0, 40)}`;
+                    bubble.appendChild(tag);
+                    bubble.appendChild(document.createElement("br"));
+                }
+                if (img && typeof img === "string" && img.startsWith("data:image/")) {
+                    const image = document.createElement("img");
+                    image.src = img;
+                    image.className = "chat-img-thumb";
+                    image.alt = "Uploaded image";
+                    bubble.appendChild(image);
+                }
+                const content = document.createElement("div");
+                if (sender === "lemon" && window.marked && window.DOMPurify) {
+                    content.innerHTML = DOMPurify.sanitize(marked.parse(String(text || "")));
+                } else {
+                    content.textContent = String(text || "");
+                }
+                bubble.appendChild(content);
+                grp.appendChild(bubble);
                 chatStream.appendChild(grp);
                 chatStream.scrollTop = chatStream.scrollHeight;
             }
