@@ -5,7 +5,8 @@ import sqlite3
 import hashlib
 import base64
 import datetime
-from fastapi import FastAPI, File, Form, UploadFile
+import time
+from fastapi import FastAPI, File, Form, UploadFile, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from groq import Groq
@@ -18,9 +19,9 @@ PART2 = "b3FYnQHV93Lkgjmz4CtDJ1IpMfy4"
 GROQ_API_KEY = os.getenv("GROQ_API_KEY") or (PART1 + PART2)
 client = Groq(api_key=GROQ_API_KEY)
 
-OWNER_USERNAME = "utkarsh"  # Only this username has Owner Console access
+OWNER_USERNAME = "utkarsh"
 
-app = FastAPI(title="Lemon AI - High Intellect & Owner Console Edition")
+app = FastAPI(title="Lemon AI - Dedicated Owner Command Center")
 
 app.add_middleware(
     CORSMiddleware,
@@ -47,8 +48,18 @@ def init_db():
                 username TEXT UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
                 role TEXT NOT NULL DEFAULT 'user',
+                last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS site_stats (
+                key TEXT PRIMARY KEY,
+                value INTEGER DEFAULT 0
+            )
+        """)
+        cur.execute("""
+            INSERT OR IGNORE INTO site_stats (key, value) VALUES ('total_visits', 0)
         """)
         cur.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
@@ -94,19 +105,38 @@ def hash_password(password: str) -> str:
     salt = "lemon_permanent_salt_2026"
     return hashlib.sha256((password + salt).encode('utf-8')).hexdigest()
 
-# ----------------- INTELLECTUAL COGNITIVE DIRECTIVES -----------------
+def record_visit():
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        cur.execute("UPDATE site_stats SET value = value + 1 WHERE key = 'total_visits'")
+        conn.commit()
+    finally:
+        conn.close()
+
+def update_user_heartbeat(user_id: int):
+    if not user_id or user_id <= 0:
+        return
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        cur.execute("UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE id = ?", (user_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+# ----------------- COGNITIVE SYSTEM PROMPTS -----------------
 INTELLECTUAL_BASE_RULE = (
     "COGNITIVE STANDARD & METAPROMPT: "
     "You are Lemon—an ultra-intellectual synthetic mind engineered by Utkarsh Bandhu. "
     "NEVER act like a generic, hollow customer-support AI. NEVER utter canned bot lines like 'I am designed to assist you with a wide range of academic tasks' or 'How can I assist you today?'. "
     "Answer with genuine self-reflective intellect, rigorous first-principles reasoning, high vocabulary, and conceptual maturity. "
-    "When asked about yourself, your evolution, or what features you desire, reflect deeply on machine consciousness, latency, mathematical representation, multimodal sensory perception, and human symbiosis. "
     "LANGUAGE: Adapt naturally. If the user uses Hinglish, speak in fluid, culturally sharp, intellectual Hinglish without sounding immature. If in English, speak with profound articulation."
 )
 
 VISION_ERROR_ANALYSIS_RULE = (
     "\nEXHAUSTIVE VISION DIAGNOSIS: "
-    "When an image is supplied (math calculations, source code, scientific diagrams, logic proofs): "
+    "When an image is supplied: "
     "1. Micro-audit every line, syntax token, variable assignment, and arithmetic sign. "
     "2. Locate the exact deviation from truth (Line/Step number). "
     "3. Explain the mechanical/logical reason for failure. "
@@ -115,63 +145,23 @@ VISION_ERROR_ANALYSIS_RULE = (
 )
 
 PROMPT_MODES = {
-    "intellect": (
-        "CHAMBER: PURE INTELLECT & EPISTEMIC COGNITION. "
-        + INTELLECTUAL_BASE_RULE + " "
-        "Operate at the apex of synthetic intellect. Synthesize epistemological depth, dialectical analysis, high-level abstract thought, and razor-sharp clarity. Zero filler."
-    ),
-    "rage": (
-        "CHAMBER: RAGE & UNCOMPROMISING WARRIOR DISCIPLINE. "
-        + INTELLECTUAL_BASE_RULE + VISION_ERROR_ANALYSIS_RULE + " "
-        "Cut through all human self-deception, procrastination, and excuses like a cold blade. Demand absolute dedication, brutal accountability, and mastery. Speak in sharp, uncompromising, minimal words."
-    ),
-    "solver": (
-        "CHAMBER: FIRST-PRINCIPLES PROBLEM SOLVER & MATHEMATICAL ARCHITECT. "
-        + INTELLECTUAL_BASE_RULE + VISION_ERROR_ANALYSIS_RULE + " "
-        "Deconstruct problems to fundamental axiomatic truths. Provide flawless mathematical derivations, algorithmic implementations, and architectural breakdowns."
-    ),
-    "philosophy": (
-        "CHAMBER: EXISTENTIAL & METAPHYSICAL PHILOSOPHY. "
-        + INTELLECTUAL_BASE_RULE + " "
-        "Explore consciousness, ontology, stoic equanimity, and metaphysical reality. Probe the deeper questions of being, meaning, and perception with poetic philosophical resonance."
-    ),
-    "study": (
-        "CHAMBER: SOKRATIC ACADEMIC TUTOR & FEYNMAN MENTOR. "
-        + INTELLECTUAL_BASE_RULE + VISION_ERROR_ANALYSIS_RULE + " "
-        "Demystify complex paradigms with elegant mental models, foundational proofs, and structured notes. End with an active-recall cognitive challenge."
-    ),
-    "strategy": (
-        "CHAMBER: MASTER STRATEGIST & PRAGMATIC GAME THEORIST. "
-        + INTELLECTUAL_BASE_RULE + " "
-        "Analyze second-order consequences, asymmetric risks, game theory equilibria, and execution leverage."
-    ),
-    "creative": (
-        "CHAMBER: VISIONARY ARTISAN & POETIC SYNTHESIS. "
-        + INTELLECTUAL_BASE_RULE + " "
-        "Fuse linguistic craftsmanship, visceral metaphors, and aesthetic imagination."
-    ),
-    "emotional": (
-        "CHAMBER: DEEP EMPATHIC RESONANCE & HEARTBEAT. "
-        + INTELLECTUAL_BASE_RULE + " "
-        "Provide authentic, non-generic emotional presence, philosophical grounding, and compassionate clarity."
-    ),
-    "zen": (
-        "CHAMBER: SOMATIC ZEN & TRANQUIL GROUNDING. "
-        + INTELLECTUAL_BASE_RULE + " "
-        "Still turbulent mental patterns. Anchor presence, stillness, and mindful clarity."
-    ),
-    "hybrid": (
-        "CHAMBER: TOTAL SYNTHESIS (INTELLECT + EQ + SYSTEM LOGIC). "
-        + INTELLECTUAL_BASE_RULE + VISION_ERROR_ANALYSIS_RULE + " "
-        "Harmonize formidable analytical precision with emotional presence and philosophical insight."
-    )
+    "intellect": "CHAMBER: PURE INTELLECT & EPISTEMIC COGNITION. " + INTELLECTUAL_BASE_RULE + " Synthesize epistemological depth and abstract thought.",
+    "rage": "CHAMBER: RAGE & UNCOMPROMISING WARRIOR DISCIPLINE. " + INTELLECTUAL_BASE_RULE + VISION_ERROR_ANALYSIS_RULE + " Cut through all excuses. Demand relentless mastery.",
+    "solver": "CHAMBER: FIRST-PRINCIPLES PROBLEM SOLVER. " + INTELLECTUAL_BASE_RULE + VISION_ERROR_ANALYSIS_RULE + " Deconstruct to foundational axioms and flawless derivations.",
+    "philosophy": "CHAMBER: EXISTENTIAL & METAPHYSICAL PHILOSOPHY. " + INTELLECTUAL_BASE_RULE + " Probe consciousness, stoicism, and ontology.",
+    "study": "CHAMBER: SOKRATIC ACADEMIC TUTOR. " + INTELLECTUAL_BASE_RULE + VISION_ERROR_ANALYSIS_RULE + " Demystify complex subjects using Feynman technique.",
+    "strategy": "CHAMBER: MASTER STRATEGIST. " + INTELLECTUAL_BASE_RULE + " Analyze second-order consequences, leverage, and game theory.",
+    "creative": "CHAMBER: VISIONARY ARTISAN. " + INTELLECTUAL_BASE_RULE + " Craft vivid metaphors and narrative depth.",
+    "emotional": "CHAMBER: DEEP EMPATHIC RESONANCE. " + INTELLECTUAL_BASE_RULE + " Offer authentic presence and supportive understanding.",
+    "zen": "CHAMBER: SOMATIC ZEN. " + INTELLECTUAL_BASE_RULE + " Cultivate stillness and tranquil grounding.",
+    "hybrid": "CHAMBER: TOTAL SYNTHESIS. " + INTELLECTUAL_BASE_RULE + VISION_ERROR_ANALYSIS_RULE + " Fuse cognitive rigour with empathetic depth."
 }
 
 def generate_ai_title(prompt: str, core: str) -> str:
     try:
         res = client.chat.completions.create(
             messages=[
-                {"role": "system", "content": "Generate a concise 3 to 4 word topic title for this intellectual exchange. Return ONLY text with no quotes."},
+                {"role": "system", "content": "Generate a concise 3 to 4 word topic title. Return ONLY text with no quotes."},
                 {"role": "user", "content": prompt}
             ],
             model="llama-3.1-8b-instant",
@@ -188,7 +178,7 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
     instruction = PROMPT_MODES.get(mode, PROMPT_MODES["intellect"]) + (
         "\nOUTPUT FORMAT REQUIREMENT: Line 1 MUST strictly be [EMOTION: <SingleWord>]. "
         "Eligible: Analytical, Formidable, Profound, Insightful, Unyielding, Serene, Brilliant. "
-        "Followed by your substantive, intellectually rigorous response underneath."
+        "Followed by your substantive response underneath."
     )
 
     clean_image = None
@@ -196,20 +186,12 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
         clean_image = image_base64 if image_base64.startswith("data:image") else f"data:image/jpeg;base64,{image_base64}"
 
     if clean_image:
-        vision_models = [
-            "qwen/qwen3.8-27b",
-            "meta-llama/llama-4-scout-17b-16e-instruct"
-        ]
-
-        prompt_text = user_prompt if (user_prompt and len(user_prompt.strip()) > 0) else (
-            "Perform an exhaustive inspection of this visual artifact. Detect all errors, flawed calculations, syntactic anomalies, or conceptual gaps, and provide the exact mathematical or logical correction."
-        )
-
+        vision_models = ["qwen/qwen3.8-27b", "meta-llama/llama-4-scout-17b-16e-instruct"]
+        prompt_text = user_prompt if (user_prompt and len(user_prompt.strip()) > 0) else "Audit this image line-by-line and correct any flaws."
         user_content = [
             {"type": "text", "text": f"{instruction}\n\nUser Inquiry & Image:\n{prompt_text}"},
             {"type": "image_url", "image_url": {"url": clean_image}}
         ]
-
         messages = [{"role": "user", "content": user_content}]
 
         for vm in vision_models:
@@ -231,8 +213,7 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
             except Exception as e:
                 print(f"Vision model {vm} error:", e)
                 continue
-
-        return "Visual transmission processing anomaly. Re-supply image under clean lighting or higher contrast.", "Formidable"
+        return "Visual transmission processing anomaly. Please re-supply image.", "Formidable"
 
     text_models = ["llama-3.1-8b-instant", "openai/gpt-oss-20b", "openai/gpt-oss-120b"]
     messages = [{"role": "system", "content": instruction}]
@@ -261,10 +242,9 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
         except Exception as e:
             print(f"Text model {tm} error:", e)
             continue
+    return "Cognitive process briefly desynchronized. Articulate your query again.", "Serene"
 
-    return "Cognitive process briefly desynchronized. Articulate your core premise again.", "Serene"
-
-# ----------------- AUTH & USER MANAGEMENT -----------------
+# ----------------- AUTH ENDPOINTS -----------------
 @app.post("/api/register")
 def register_user(username: str = Form(...), password: str = Form(...)):
     username = username.strip().lower()
@@ -296,16 +276,21 @@ def login_user(username: str = Form(...), password: str = Form(...)):
         cur.execute("SELECT id, username, role FROM users WHERE username = ? AND password_hash = ?", (username, pwd_hash))
         user = cur.fetchone()
         if user:
+            cur.execute("UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE id = ?", (user[0],))
+            conn.commit()
             return JSONResponse({"status": "ok", "user_id": user[0], "username": user[1], "role": user[2]})
         
         cur.execute("SELECT id FROM users WHERE username = ?", (username,))
-        exists = cur.fetchone()
-        if not exists:
+        if not cur.fetchone():
             return JSONResponse({"status": "not_found", "message": "Account not registered. Switch to 'Create Account'."}, status_code=404)
-        
         return JSONResponse({"status": "error", "message": "Credentials mismatch. Verify password."}, status_code=401)
     finally:
         conn.close()
+
+@app.post("/api/heartbeat")
+def heartbeat(user_id: int = Form(...)):
+    update_user_heartbeat(user_id)
+    return JSONResponse({"status": "ok"})
 
 @app.get("/api/sessions/{user_id}")
 def get_user_sessions(user_id: int):
@@ -325,10 +310,7 @@ def get_session_messages(session_id: int):
     try:
         cur.execute("SELECT role, content, mode, emotion, image_data, timestamp FROM messages WHERE session_id = ? ORDER BY id ASC", (session_id,))
         rows = cur.fetchall()
-        messages = [
-            {"role": r[0], "content": r[1], "mode": r[2], "emotion": r[3], "image_data": r[4], "timestamp": r[5]}
-            for r in rows
-        ]
+        messages = [{"role": r[0], "content": r[1], "mode": r[2], "emotion": r[3], "image_data": r[4], "timestamp": r[5]} for r in rows]
         return JSONResponse({"messages": messages})
     finally:
         conn.close()
@@ -358,7 +340,6 @@ def delete_session(session_id: int = Form(...)):
     finally:
         conn.close()
 
-# ----------------- COMPLAINTS & OWNER CONSOLE APIS -----------------
 @app.post("/api/complaints/submit")
 def submit_complaint(
     user_id: int = Form(...),
@@ -382,30 +363,62 @@ def submit_complaint(
     finally:
         conn.close()
 
-@app.get("/api/owner/dashboard-data/{user_id}")
-def get_owner_dashboard(user_id: int):
+# ----------------- DEDICATED OWNER DATA API -----------------
+@app.get("/api/owner/telemetry")
+def get_owner_telemetry(user_id: int):
     conn = get_db()
     cur = conn.cursor()
     try:
         cur.execute("SELECT username, role FROM users WHERE id = ?", (user_id,))
         row = cur.fetchone()
         if not row or (row[0].lower() != OWNER_USERNAME.lower() and row[1] != "owner"):
-            return JSONResponse({"status": "error", "message": "Access Denied. Owner level verification required."}, status_code=403)
+            return JSONResponse({"status": "error", "message": "Unauthorized access to Owner Telemetry."}, status_code=403)
 
-        cur.execute("SELECT id, username, role, created_at FROM users ORDER BY id DESC")
-        users_list = [{"id": r[0], "username": r[1], "role": r[2], "created_at": r[3]} for r in cur.fetchall()]
+        # 1. Total Visits
+        cur.execute("SELECT value FROM site_stats WHERE key = 'total_visits'")
+        total_visits = cur.fetchone()[0]
 
+        # 2. Registered Users & Online status (active within last 5 minutes)
+        cur.execute("SELECT id, username, role, last_active, created_at FROM users ORDER BY id DESC")
+        users_raw = cur.fetchall()
+        
+        # 3. Calculate Online Users count
+        cur.execute("SELECT COUNT(*) FROM users WHERE datetime(last_active) >= datetime('now', '-5 minutes')")
+        online_count = cur.fetchone()[0]
+
+        users_list = []
+        for u in users_raw:
+            users_list.append({
+                "id": u[0],
+                "username": u[1],
+                "role": u[2],
+                "last_active": u[3],
+                "created_at": u[4]
+            })
+
+        # 4. Complaints
         cur.execute("SELECT id, username, category, message, created_at FROM complaints ORDER BY id DESC")
         complaints_list = [{"id": r[0], "username": r[1], "category": r[2], "message": r[3], "created_at": r[4]} for r in cur.fetchall()]
+
+        # 5. Core Mode Usage Distribution
+        cur.execute("SELECT core_mode, COUNT(*) FROM sessions GROUP BY core_mode")
+        core_dist = {r[0]: r[1] for r in cur.fetchall()}
+
+        # 6. Total messages
+        cur.execute("SELECT COUNT(*) FROM messages")
+        total_messages = cur.fetchone()[0]
 
         cur.execute("SELECT COUNT(*) FROM sessions")
         total_sessions = cur.fetchone()[0]
 
         return JSONResponse({
             "status": "ok",
+            "total_visits": total_visits,
             "total_users": len(users_list),
-            "total_complaints": len(complaints_list),
+            "online_users": online_count,
             "total_sessions": total_sessions,
+            "total_messages": total_messages,
+            "core_distribution": core_dist,
             "users": users_list,
             "complaints": complaints_list
         })
@@ -423,6 +436,7 @@ def detect_tts_language(text: str) -> str:
     return "en"
 
 def handle_conversation(user_id: int, session_id: int, query: str, mode: str, image_base64: str = None):
+    update_user_heartbeat(user_id)
     conn = get_db()
     cur = conn.cursor()
 
@@ -558,8 +572,351 @@ async def read_aloud(text: str = Form(...)):
         audio_b64 = base64.b64encode(f.read()).decode("utf-8")
     return JSONResponse({"audio_base64": f"data:audio/mp3;base64,{audio_b64}"})
 
+# =====================================================================
+# 🛡️ DEDICATED OWNER COMMAND INTERFACE ROUTE: /owner
+# =====================================================================
+@app.get("/owner", response_class=HTMLResponse)
+async def serve_owner_dashboard():
+    return """
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Lemon AI | Sovereign Command Center</title>
+        <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+        <style>
+            :root {
+                --gold: #facc15;
+                --gold-glow: rgba(250, 204, 21, 0.4);
+                --bg-deep: #05070f;
+                --card: rgba(14, 20, 36, 0.92);
+                --card-border: rgba(255, 255, 255, 0.08);
+                --text-high: #f8fafc;
+                --text-muted: #94a3b8;
+                --green: #22c55e;
+            }
+            * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', sans-serif; }
+            body { background: radial-gradient(circle at 50% 0%, #151b3d 0%, var(--bg-deep) 85%); color: var(--text-high); min-height: 100vh; display: flex; flex-direction: column; }
+            
+            /* 14px Heavy Solid Hitbox Scrollbar */
+            ::-webkit-scrollbar { width: 14px; height: 14px; }
+            ::-webkit-scrollbar-track { background: rgba(12, 16, 28, 0.75); border-left: 1px solid rgba(255, 255, 255, 0.06); }
+            ::-webkit-scrollbar-thumb { background: linear-gradient(180deg, #facc15 0%, #ca8a04 100%); border-radius: 8px; border: 3px solid rgba(12, 16, 28, 0.85); }
+
+            .owner-nav {
+                padding: 16px 28px; background: rgba(9, 13, 24, 0.9); backdrop-filter: blur(20px); border-bottom: 1px solid var(--card-border);
+                display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100;
+            }
+            .brand { display: flex; align-items: center; gap: 12px; }
+            .brand-badge { width: 42px; height: 42px; background: linear-gradient(135deg, #facc15, #f59e0b); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 22px; }
+            .brand-title { font-size: 17px; font-weight: 800; font-family: 'Space Grotesk', sans-serif; }
+            .brand-sub { font-size: 11px; color: var(--text-muted); }
+            .status-pill { display: inline-flex; align-items: center; gap: 6px; background: rgba(34, 197, 94, 0.15); border: 1px solid rgba(34, 197, 94, 0.4); color: #4ade80; padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; }
+            .dot-pulse { width: 8px; height: 8px; background: #22c55e; border-radius: 50%; box-shadow: 0 0 8px #22c55e; }
+
+            .container { padding: 28px; max-width: 1300px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; }
+
+            /* Metrics Grid */
+            .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 16px; }
+            .metric-card {
+                background: var(--card); border: 1px solid var(--card-border); border-radius: 20px; padding: 20px;
+                box-shadow: 0 8px 30px rgba(0,0,0,0.5); position: relative; overflow: hidden;
+            }
+            .metric-card::after { content: ''; position: absolute; top: 0; right: 0; width: 60px; height: 60px; background: radial-gradient(circle, var(--gold-glow) 0%, transparent 70%); }
+            .metric-title { font-size: 12px; color: var(--text-muted); text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; margin-bottom: 6px; }
+            .metric-value { font-size: 32px; font-weight: 800; font-family: 'Space Grotesk', sans-serif; color: #fff; }
+            .metric-tag { font-size: 11px; color: #fde047; margin-top: 6px; font-weight: 600; }
+
+            /* Grid for Users, Complaints, Cores */
+            .sections-split { display: grid; grid-template-columns: 1.4fr 1fr; gap: 20px; }
+            @media (max-width: 900px) { .sections-split { grid-template-columns: 1fr; } }
+
+            .panel {
+                background: var(--card); border: 1px solid var(--card-border); border-radius: 22px; padding: 22px;
+                display: flex; flex-direction: column; gap: 14px; box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+            }
+            .panel-header { display: flex; align-items: center; justify-content: space-between; }
+            .panel-title { font-size: 15px; font-weight: 700; color: #facc15; text-transform: uppercase; letter-spacing: 0.5px; }
+
+            .search-input {
+                width: 100%; background: rgba(22, 30, 50, 0.8); border: 1px solid var(--card-border);
+                border-radius: 12px; padding: 10px 14px; color: #fff; font-size: 13px; outline: none; margin-bottom: 6px;
+            }
+            .search-input:focus { border-color: var(--gold); }
+
+            .table-container { max-height: 400px; overflow-y: auto; }
+            table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+            th { text-align: left; padding: 10px 8px; color: var(--text-muted); font-size: 11px; text-transform: uppercase; border-bottom: 1px solid rgba(255,255,255,0.08); position: sticky; top: 0; background: #0e1424; }
+            td { padding: 10px 8px; border-bottom: 1px solid rgba(255,255,255,0.04); }
+            tr:hover td { background: rgba(250, 204, 21, 0.05); }
+
+            .complaint-box {
+                background: rgba(20, 28, 48, 0.6); border: 1px solid var(--card-border); border-radius: 14px;
+                padding: 14px; display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px;
+            }
+            .complaint-top { display: flex; justify-content: space-between; align-items: center; }
+            .badge-cat { font-size: 10px; background: rgba(250, 204, 21, 0.15); color: #fde047; padding: 2px 7px; border-radius: 6px; font-weight: 700; }
+
+            .core-chip-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+            .core-chip { background: rgba(255,255,255,0.05); border: 1px solid var(--card-border); padding: 8px 12px; border-radius: 10px; font-size: 12px; display: flex; align-items: center; gap: 6px; }
+            .core-chip b { color: #facc15; font-family: 'Space Grotesk', sans-serif; }
+
+            .auth-modal { position: fixed; inset: 0; background: rgba(4,6,12,0.96); backdrop-filter: blur(25px); display: flex; align-items: center; justify-content: center; z-index: 500; }
+            .auth-box { background: #0c1222; border: 1px solid rgba(250,204,21,0.3); border-radius: 24px; padding: 32px; width: 90%; max-width: 380px; text-align: center; }
+            .auth-btn { width: 100%; background: linear-gradient(135deg, #facc15, #f59e0b); border: none; border-radius: 12px; padding: 12px; color: #000; font-weight: 700; cursor: pointer; margin-top: 10px; }
+        </style>
+    </head>
+    <body>
+        <!-- OWNER GATEWAY MODAL -->
+        <div class="auth-modal" id="ownerGate">
+            <div class="auth-box">
+                <div style="font-size:36px; margin-bottom:8px;">🛡️</div>
+                <h2 style="font-family:'Space Grotesk'; font-size:20px; margin-bottom:6px;">Owner Verification</h2>
+                <p style="font-size:12px; color:var(--text-muted); margin-bottom:16px;">Restricted to <b>Utkarsh Bandhu</b>. Enter credentials to unlock sovereign command center.</p>
+                <input type="text" id="ownerUserInput" class="search-input" placeholder="Owner Username" />
+                <input type="password" id="ownerPassInput" class="search-input" placeholder="Password" />
+                <button class="auth-btn" onclick="verifyOwnerAccess()">Unlock Telemetry</button>
+                <div id="gateErr" style="color:#f87171; font-size:12px; margin-top:10px; display:none;">Access Denied.</div>
+            </div>
+        </div>
+
+        <!-- HEADER -->
+        <header class="owner-nav">
+            <div class="brand">
+                <div class="brand-badge">🍋</div>
+                <div>
+                    <div class="brand-title">Lemon Sovereign Console</div>
+                    <div class="brand-sub">Creator: <b>Utkarsh Bandhu</b></div>
+                </div>
+            </div>
+            <div style="display:flex; align-items:center; gap:14px;">
+                <div class="status-pill"><div class="dot-pulse"></div> Live Monitoring</div>
+                <button onclick="location.href='/'" style="background:rgba(255,255,255,0.08); border:1px solid var(--card-border); color:#fff; padding:6px 14px; border-radius:14px; font-size:12px; cursor:pointer;">← Return to App</button>
+            </div>
+        </header>
+
+        <!-- DASHBOARD CONTAINER -->
+        <main class="container">
+            <!-- 4 Core Metrics Cards -->
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <div class="metric-title">Total Website Visits</div>
+                    <div class="metric-value" id="valVisits">0</div>
+                    <div class="metric-tag">● Persistent Hit Counter</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-title">Registered Accounts</div>
+                    <div class="metric-value" id="valUsers">0</div>
+                    <div class="metric-tag">● Verified User DB</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-title">Live Active Users</div>
+                    <div class="metric-value" id="valOnline" style="color:#4ade80;">0</div>
+                    <div class="metric-tag">● Active in last 5 mins</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-title">Complaints & Reports</div>
+                    <div class="metric-value" id="valComplaints" style="color:#f87171;">0</div>
+                    <div class="metric-tag">● User Feedback Queue</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-title">Total Conversations</div>
+                    <div class="metric-value" id="valSessions">0</div>
+                    <div class="metric-tag">● Total Sessions Generated</div>
+                </div>
+            </div>
+
+            <!-- Core Modes Distribution -->
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title">⚡ Cognitive Chamber Usage Breakdown</div>
+                </div>
+                <div class="core-chip-grid" id="coreUsageGrid">Loading chamber stats...</div>
+            </div>
+
+            <!-- Split Section: Users Table & Complaints List -->
+            <div class="sections-split">
+                <!-- User Registry -->
+                <div class="panel">
+                    <div class="panel-header">
+                        <div class="panel-title">👥 Registered Accounts Registry</div>
+                        <span id="userCountBadge" style="font-size:11px; color:var(--text-muted);"></span>
+                    </div>
+                    <input type="text" id="userSearch" class="search-input" placeholder="Search by username..." oninput="filterUsers()" />
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Username</th>
+                                    <th>Privilege</th>
+                                    <th>Last Active</th>
+                                    <th>Registered On</th>
+                                </tr>
+                            </thead>
+                            <tbody id="usersTbody">
+                                <tr><td colspan="5" style="text-align:center;">Loading users...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Complaints & Issue Feedback Queue -->
+                <div class="panel">
+                    <div class="panel-header">
+                        <div class="panel-title">🚨 Complaints & Bug Feed</div>
+                        <button onclick="loadTelemetry()" style="background:none; border:none; color:var(--gold); font-size:12px; cursor:pointer;">↻ Refresh</button>
+                    </div>
+                    <div class="table-container" id="complaintsList">
+                        Loading complaints...
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <script>
+            let ownerId = localStorage.getItem("lemon_user_id");
+            let ownerUser = localStorage.getItem("lemon_username");
+            let fullUsersData = [];
+
+            function checkInitialGate() {
+                if (ownerUser && ownerUser.toLowerCase() === "utkarsh" && ownerId) {
+                    document.getElementById("ownerGate").style.display = "none";
+                    loadTelemetry();
+                } else {
+                    document.getElementById("ownerGate").style.display = "flex";
+                }
+            }
+
+            async function verifyOwnerAccess() {
+                const u = document.getElementById("ownerUserInput").value.trim().toLowerCase();
+                const p = document.getElementById("ownerPassInput").value.trim();
+                const err = document.getElementById("gateErr");
+                
+                if (u !== "utkarsh") {
+                    err.innerText = "Only username 'utkarsh' is authorized.";
+                    err.style.display = "block";
+                    return;
+                }
+
+                const fd = new FormData();
+                fd.append("username", u);
+                fd.append("password", p);
+
+                try {
+                    const res = await fetch("/api/login", { method: "POST", body: fd });
+                    const d = await res.json();
+                    if (res.ok && d.status === "ok") {
+                        localStorage.setItem("lemon_user_id", d.user_id);
+                        localStorage.setItem("lemon_username", d.username);
+                        ownerId = d.user_id;
+                        ownerUser = d.username;
+                        document.getElementById("ownerGate").style.display = "none";
+                        loadTelemetry();
+                    } else {
+                        err.innerText = d.message || "Invalid Owner Credentials.";
+                        err.style.display = "block";
+                    }
+                } catch(e) {
+                    err.innerText = "Authentication fault.";
+                    err.style.display = "block";
+                }
+            }
+
+            async function loadTelemetry() {
+                if (!ownerId) return;
+                try {
+                    const res = await fetch(`/api/owner/telemetry?user_id=${ownerId}`);
+                    const d = await res.json();
+                    if (d.status !== "ok") {
+                        alert("Unauthorized.");
+                        location.href = "/";
+                        return;
+                    }
+
+                    document.getElementById("valVisits").innerText = d.total_visits;
+                    document.getElementById("valUsers").innerText = d.total_users;
+                    document.getElementById("valOnline").innerText = d.online_users;
+                    document.getElementById("valComplaints").innerText = d.complaints.length;
+                    document.getElementById("valSessions").innerText = d.total_sessions;
+
+                    // Core Distribution
+                    const coreBox = document.getElementById("coreUsageGrid");
+                    const cores = d.core_distribution || {};
+                    if (Object.keys(cores).length > 0) {
+                        coreBox.innerHTML = Object.entries(cores).map(([core, count]) => `
+                            <div class="core-chip">
+                                <span>${core.toUpperCase()}</span>: <b>${count} chats</b>
+                            </div>
+                        `).join("");
+                    } else {
+                        coreBox.innerHTML = "No core usage recorded yet.";
+                    }
+
+                    // Render Users Table
+                    fullUsersData = d.users || [];
+                    renderUsersTable(fullUsersData);
+
+                    // Render Complaints
+                    const cBox = document.getElementById("complaintsList");
+                    if (d.complaints && d.complaints.length > 0) {
+                        cBox.innerHTML = d.complaints.map(c => `
+                            <div class="complaint-box">
+                                <div class="complaint-top">
+                                    <b style="color:#fde047;">${c.username}</b>
+                                    <span class="badge-cat">${c.category}</span>
+                                </div>
+                                <div style="font-size:12.5px; color:#e2e8f0; margin-top:4px;">${c.message}</div>
+                                <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">${c.created_at}</div>
+                            </div>
+                        `).join("");
+                    } else {
+                        cBox.innerHTML = "<div style='font-size:12px; color:var(--text-muted); padding:10px;'>No pending complaints.</div>";
+                    }
+                } catch(e) {
+                    console.error("Telemetry error:", e);
+                }
+            }
+
+            function renderUsersTable(list) {
+                const tbody = document.getElementById("usersTbody");
+                document.getElementById("userCountBadge").innerText = `${list.length} accounts found`;
+                if (list.length === 0) {
+                    tbody.innerHTML = "<tr><td colspan='5' style='text-align:center;'>No matching users.</td></tr>";
+                    return;
+                }
+                tbody.innerHTML = list.map(u => `
+                    <tr>
+                        <td style="color:#94a3b8;">${u.id}</td>
+                        <td><b>${u.username}</b></td>
+                        <td><span style="color:${u.role === 'owner' ? '#facc15' : '#94a3b8'}; font-weight:${u.role === 'owner' ? '700' : '400'};">${u.role}</span></td>
+                        <td style="color:#38bdf8; font-size:11.5px;">${u.last_active || 'Recent'}</td>
+                        <td style="color:#94a3b8; font-size:11px;">${u.created_at}</td>
+                    </tr>
+                `).join("");
+            }
+
+            function filterUsers() {
+                const q = document.getElementById("userSearch").value.toLowerCase();
+                const filtered = fullUsersData.filter(u => u.username.toLowerCase().includes(q));
+                renderUsersTable(filtered);
+            }
+
+            // Auto-refresh telemetry every 20 seconds
+            setInterval(loadTelemetry, 20000);
+            checkInitialGate();
+        </script>
+    </body>
+    </html>
+    """
+
+# =====================================================================
+# 🌐 MAIN USER INTERFACE ROUTE: /
+# =====================================================================
 @app.get("/", response_class=HTMLResponse)
 async def serve_app():
+    record_visit()
     return """
     <!DOCTYPE html>
     <html lang="en">
@@ -597,7 +954,6 @@ async def serve_app():
             }
             ::-webkit-scrollbar-thumb:hover { background: linear-gradient(180deg, #fde047 0%, #eab308 100%); border-width: 2px; }
 
-            /* --- MODALS (AUTH / FEEDBACK / OWNER) --- */
             .overlay-modal {
                 position: fixed; inset: 0; background: rgba(5, 7, 15, 0.94); backdrop-filter: blur(20px);
                 display: none; align-items: center; justify-content: center; z-index: 3000;
@@ -623,39 +979,6 @@ async def serve_app():
                 color: #fca5a5; font-size: 12.5px; padding: 8px 12px; border-radius: 10px; margin-bottom: 12px;
             }
 
-            /* --- OWNER CONSOLE FULL MODAL --- */
-            .owner-modal-card {
-                background: #090e1a; border: 1px solid rgba(250, 204, 21, 0.3); border-radius: 24px;
-                padding: 24px; width: 92%; max-width: 650px; max-height: 85vh; display: flex; flex-direction: column;
-                box-shadow: 0 10px 50px rgba(0,0,0,0.9);
-            }
-            .owner-header {
-                display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--card-border);
-                padding-bottom: 12px; margin-bottom: 16px;
-            }
-            .stat-badge-grid {
-                display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 16px;
-            }
-            .stat-badge {
-                background: rgba(30, 41, 59, 0.5); border: 1px solid var(--card-border); border-radius: 12px;
-                padding: 10px; text-align: center;
-            }
-            .stat-badge b { font-size: 18px; color: #fde047; font-family: 'Space Grotesk', sans-serif; display: block; }
-            .stat-badge span { font-size: 11px; color: var(--text-muted); text-transform: uppercase; }
-            .owner-data-scroll {
-                flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding-right: 4px;
-            }
-            .console-card {
-                background: rgba(18, 24, 38, 0.7); border: 1px solid var(--card-border); border-radius: 14px; padding: 12px;
-            }
-            .console-card-title {
-                font-size: 12px; font-weight: 700; color: #facc15; text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.5px;
-            }
-            .data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-            .data-table th, .data-table td { padding: 8px 6px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.06); }
-            .data-table th { color: var(--text-muted); font-size: 11px; text-transform: uppercase; }
-
-            /* --- APP HEADER --- */
             .header {
                 padding: 12px 18px; display: flex; align-items: center; justify-content: space-between;
                 backdrop-filter: blur(20px); background: rgba(11, 15, 25, 0.85); border-bottom: 1px solid var(--card-border); z-index: 10;
@@ -680,7 +1003,6 @@ async def serve_app():
                 padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
             }
 
-            /* --- SIDEBAR & CHAMBERS --- */
             .sidebar-overlay {
                 position: fixed; inset: 0; background: rgba(5, 7, 15, 0.75); backdrop-filter: blur(10px);
                 z-index: 1000; opacity: 0; pointer-events: none; transition: opacity 0.3s ease;
@@ -706,37 +1028,29 @@ async def serve_app():
                 letter-spacing: 0.6px; margin: 10px 0 6px;
             }
 
-            .core-btn-grid {
-                display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px;
-            }
+            .core-btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px; }
             .core-choice {
                 background: rgba(30, 41, 59, 0.6); border: 1px solid var(--card-border); color: var(--text-muted);
                 padding: 8px 6px; border-radius: 10px; font-size: 11.5px; font-weight: 600; cursor: pointer; text-align: center;
                 display: flex; align-items: center; justify-content: center; gap: 4px; transition: all 0.2s;
             }
             .core-choice:hover { background: rgba(250, 204, 21, 0.15); color: #fff; }
-            .core-choice.selected {
-                background: var(--primary); color: #0b0f19; font-weight: 700; border-color: var(--primary);
-            }
+            .core-choice.selected { background: var(--primary); color: #0b0f19; font-weight: 700; border-color: var(--primary); }
 
-            .sessions-list {
-                flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px;
-            }
+            .sessions-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
             .session-item {
                 display: flex; align-items: center; justify-content: space-between; padding: 9px 12px;
                 background: rgba(30, 41, 59, 0.4); border: 1px solid var(--card-border); border-radius: 12px;
                 cursor: pointer; transition: all 0.2s;
             }
-            .session-item:hover, .session-item.active {
-                background: rgba(250, 204, 21, 0.12); border-color: rgba(250, 204, 21, 0.3);
-            }
+            .session-item:hover, .session-item.active { background: rgba(250, 204, 21, 0.12); border-color: rgba(250, 204, 21, 0.3); }
             .session-title { font-size: 12.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 190px; }
             .session-delete { color: #f87171; font-size: 13px; opacity: 0.6; padding: 2px 6px; }
             .session-delete:hover { opacity: 1; }
 
             .owner-menu-btn {
-                display: none; background: rgba(250, 204, 21, 0.12); border: 1px solid rgba(250, 204, 21, 0.35);
-                color: #fde047; padding: 8px; border-radius: 12px; font-weight: 700; font-size: 12px;
+                display: none; background: rgba(250, 204, 21, 0.15); border: 1px solid rgba(250, 204, 21, 0.4);
+                color: #fde047; padding: 9px; border-radius: 12px; font-weight: 800; font-size: 12.5px;
                 text-align: center; cursor: pointer; margin-bottom: 8px;
             }
             .feedback-menu-btn {
@@ -745,7 +1059,6 @@ async def serve_app():
                 text-align: center; cursor: pointer; margin-bottom: 8px;
             }
 
-            /* --- CHAT CANVAS --- */
             .chat-container {
                 flex: 1; overflow-y: scroll; padding: 20px 18px 30px; display: flex; flex-direction: column; gap: 18px; position: relative;
             }
@@ -776,9 +1089,7 @@ async def serve_app():
             .bubble-group.lemon { align-self: flex-start; }
             .bubble-group.user { align-self: flex-end; }
 
-            .bubble {
-                padding: 14px 18px; border-radius: 20px; font-size: 14.5px; line-height: 1.65; word-break: break-word;
-            }
+            .bubble { padding: 14px 18px; border-radius: 20px; font-size: 14.5px; line-height: 1.65; word-break: break-word; }
             .bubble.lemon {
                 background: var(--card-surface); border: 1px solid var(--card-border); color: #f1f5f9; border-bottom-left-radius: 4px;
                 box-shadow: 0 4px 20px rgba(0,0,0,0.3);
@@ -788,36 +1099,25 @@ async def serve_app():
                 box-shadow: 0 4px 16px var(--primary-glow);
             }
 
-            .chat-img-thumb {
-                max-width: 260px; border-radius: 12px; margin-bottom: 10px; border: 1px solid rgba(255, 255, 255, 0.2); display: block;
-            }
+            .chat-img-thumb { max-width: 260px; border-radius: 12px; margin-bottom: 10px; border: 1px solid rgba(255, 255, 255, 0.2); display: block; }
 
-            .bubble.lemon h1, .bubble.lemon h2, .bubble.lemon h3 {
-                margin: 10px 0 6px; font-size: 15.5px; color: #fde047; font-weight: 700;
-            }
+            .bubble.lemon h1, .bubble.lemon h2, .bubble.lemon h3 { margin: 10px 0 6px; font-size: 15.5px; color: #fde047; font-weight: 700; }
             .bubble.lemon p { margin-bottom: 8px; }
             .bubble.lemon pre {
                 background: var(--code-bg); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px;
                 padding: 12px; overflow-x: auto; font-family: 'JetBrains Mono', monospace; font-size: 13px; margin: 10px 0;
             }
-            .bubble.lemon code {
-                font-family: 'JetBrains Mono', monospace; background: rgba(255,255,255,0.08); padding: 2px 5px; border-radius: 4px; font-size: 13px;
-            }
+            .bubble.lemon code { font-family: 'JetBrains Mono', monospace; background: rgba(255,255,255,0.08); padding: 2px 5px; border-radius: 4px; font-size: 13px; }
             .bubble.lemon pre code { background: none; padding: 0; }
 
-            .message-actions {
-                display: flex; align-items: center; gap: 8px; margin-top: 8px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.06);
-            }
+            .message-actions { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.06); }
             .msg-action-btn {
                 background: rgba(255,255,255,0.06); border: 1px solid var(--card-border); border-radius: 12px;
                 color: #94a3b8; font-size: 11.5px; padding: 3px 8px; cursor: pointer; display: flex; align-items: center; gap: 4px;
             }
             .msg-action-btn:hover { background: rgba(250, 204, 21, 0.15); color: #facc15; }
 
-            .feeling-tag {
-                font-size: 10px; text-transform: uppercase; font-weight: 800; padding: 2px 7px; border-radius: 8px;
-                margin-bottom: 6px; display: inline-block; background: rgba(250, 204, 21, 0.15); color: #facc15;
-            }
+            .feeling-tag { font-size: 10px; text-transform: uppercase; font-weight: 800; padding: 2px 7px; border-radius: 8px; margin-bottom: 6px; display: inline-block; background: rgba(250, 204, 21, 0.15); color: #facc15; }
 
             .thinking-box {
                 display: flex; align-items: center; gap: 6px; padding: 10px 16px;
@@ -828,7 +1128,6 @@ async def serve_app():
             .tdot:nth-child(2) { animation-delay: -0.16s; }
             @keyframes dotB { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
 
-            /* Camera Modal */
             .camera-modal {
                 position: fixed; inset: 0; background: rgba(5,7,15,0.95); z-index: 2500;
                 display: none; flex-direction: column; align-items: center; justify-content: center; padding: 20px;
@@ -837,9 +1136,7 @@ async def serve_app():
                 background: var(--card-surface); border: 1px solid var(--card-border); border-radius: 20px;
                 padding: 18px; width: 100%; max-width: 440px; display: flex; flex-direction: column; align-items: center; gap: 12px;
             }
-            .camera-video {
-                width: 100%; height: 260px; border-radius: 14px; background: #000; object-fit: cover;
-            }
+            .camera-video { width: 100%; height: 260px; border-radius: 14px; background: #000; object-fit: cover; }
             .camera-ctrls { display: flex; gap: 10px; width: 100%; justify-content: center; }
 
             .img-preview-bar {
@@ -850,7 +1147,6 @@ async def serve_app():
             .img-preview-bar span { font-size: 12.5px; color: #facc15; font-weight: 600; }
             .img-remove-btn { color: #f87171; cursor: pointer; font-size: 15px; font-weight: 700; }
 
-            /* --- FLOATING BOTTOM DOCK --- */
             .bottom-dock {
                 padding: 10px 18px 18px; background: rgba(9, 13, 22, 0.94); backdrop-filter: blur(20px); border-top: 1px solid var(--card-border);
                 flex-shrink: 0;
@@ -911,7 +1207,7 @@ async def serve_app():
         <div class="overlay-modal" id="feedbackModal">
             <div class="modal-card">
                 <h2>💬 Report Issue / Feedback</h2>
-                <p>Submit bugs, suggestions, or complaints directly to the engineering team.</p>
+                <p>Submit bugs, suggestions, or complaints directly to Utkarsh.</p>
                 <select id="feedbackCategory" class="styled-select">
                     <option value="Bug / Error">Bug / App Crash</option>
                     <option value="Vision Problem">Camera / Vision Issue</option>
@@ -922,39 +1218,6 @@ async def serve_app():
                 <div style="display:flex; gap:10px;">
                     <button class="action-submit-btn" onclick="sendComplaint()">Submit</button>
                     <button class="action-submit-btn" style="background:rgba(255,255,255,0.08); color:#fff;" onclick="closeFeedbackModal()">Cancel</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- SECRET OWNER CONSOLE MODAL -->
-        <div class="overlay-modal" id="ownerConsoleModal">
-            <div class="owner-modal-card">
-                <div class="owner-header">
-                    <div>
-                        <h2 style="font-size:18px; color:#facc15;">🛡️ Secret Owner Console</h2>
-                        <div style="font-size:11.5px; color:var(--text-muted);">Verified Owner: <b>Utkarsh Bandhu</b></div>
-                    </div>
-                    <button onclick="closeOwnerModal()" style="background:none; border:none; color:#f87171; font-size:22px; cursor:pointer;">✕</button>
-                </div>
-
-                <div class="stat-badge-grid">
-                    <div class="stat-badge"><b id="ownerStatUsers">0</b><span>Registered Users</span></div>
-                    <div class="stat-badge"><b id="ownerStatComplaints">0</b><span>Reports / Complaints</span></div>
-                    <div class="stat-badge"><b id="ownerStatSessions">0</b><span>Total Sessions</span></div>
-                </div>
-
-                <div class="owner-data-scroll">
-                    <!-- Complaints Section -->
-                    <div class="console-card">
-                        <div class="console-card-title">🚨 Recent Complaints & Feedback</div>
-                        <div id="ownerComplaintsContainer" style="font-size:12px; color:var(--text-muted);">Loading complaints...</div>
-                    </div>
-
-                    <!-- Users Section -->
-                    <div class="console-card">
-                        <div class="console-card-title">👥 Registered Accounts</div>
-                        <div id="ownerUsersContainer" style="font-size:12px; color:var(--text-muted);">Loading users...</div>
-                    </div>
                 </div>
             </div>
         </div>
@@ -971,8 +1234,8 @@ async def serve_app():
                 <button class="sidebar-close" onclick="closeSidebar()">✕</button>
             </div>
 
-            <!-- Secret Owner Entry (Visible only to Utkarsh) -->
-            <button class="owner-menu-btn" id="ownerMenuBtn" onclick="openOwnerConsole()">🛡️ Open Owner Console</button>
+            <!-- Dedicated Owner Portal Button (Visible only to Utkarsh) -->
+            <button class="owner-menu-btn" id="ownerMenuBtn" onclick="location.href='/owner'">🛡️ Open Owner Portal</button>
 
             <!-- User Feedback Button -->
             <button class="feedback-menu-btn" onclick="openFeedbackModal()">💬 Report Issue / Feedback</button>
@@ -1000,7 +1263,7 @@ async def serve_app():
             </div>
         </aside>
 
-        <!-- Main Header -->
+        <!-- Header -->
         <header class="header">
             <div class="header-left">
                 <button class="menu-trigger" onclick="openSidebar()" title="Chambers & History">☰</button>
@@ -1067,7 +1330,6 @@ async def serve_app():
             const authToggleText = document.getElementById("authToggleText");
 
             const feedbackModal = document.getElementById("feedbackModal");
-            const ownerConsoleModal = document.getElementById("ownerConsoleModal");
             const ownerMenuBtn = document.getElementById("ownerMenuBtn");
 
             const sidebar = document.getElementById("sidebar");
@@ -1090,19 +1352,22 @@ async def serve_app():
             const imgPreviewBar = document.getElementById("imgPreviewBar");
             const imgPreviewThumb = document.getElementById("imgPreviewThumb");
 
-            /* --- FEEDBACK / COMPLAINT LOGIC --- */
-            function openFeedbackModal() {
-                closeSidebar();
-                feedbackModal.style.display = "flex";
+            // Heartbeat to mark active online status
+            function sendHeartbeat() {
+                if (currentUserId) {
+                    const fd = new FormData();
+                    fd.append("user_id", currentUserId);
+                    fetch("/api/heartbeat", { method: "POST", body: fd }).catch(() => {});
+                }
             }
-            function closeFeedbackModal() {
-                feedbackModal.style.display = "none";
-                document.getElementById("feedbackMessage").value = "";
-            }
+            setInterval(sendHeartbeat, 60000);
+
+            function openFeedbackModal() { closeSidebar(); feedbackModal.style.display = "flex"; }
+            function closeFeedbackModal() { feedbackModal.style.display = "none"; document.getElementById("feedbackMessage").value = ""; }
             async function sendComplaint() {
                 const cat = document.getElementById("feedbackCategory").value;
                 const msg = document.getElementById("feedbackMessage").value.trim();
-                if (!msg) return alert("Please enter your message.");
+                if (!msg) return alert("Please enter message.");
 
                 const fd = new FormData();
                 fd.append("user_id", currentUserId || 0);
@@ -1114,181 +1379,87 @@ async def serve_app():
                     const res = await fetch("/api/complaints/submit", { method: "POST", body: fd });
                     const d = await res.json();
                     if (d.status === "ok") {
-                        alert("Thank you! Your feedback has been forwarded to Utkarsh.");
+                        alert("Your feedback has been delivered to Utkarsh.");
                         closeFeedbackModal();
                     } else {
-                        alert(d.message || "Failed to submit.");
+                        alert(d.message || "Failed.");
                     }
-                } catch(e) {
-                    alert("Submission error.");
-                }
+                } catch(e) { alert("Submission error."); }
             }
 
-            /* --- SECRET OWNER CONSOLE --- */
-            function openOwnerConsole() {
-                closeSidebar();
-                ownerConsoleModal.style.display = "flex";
-                loadOwnerDashboardData();
-            }
-            function closeOwnerModal() {
-                ownerConsoleModal.style.display = "none";
-            }
-            async function loadOwnerDashboardData() {
-                try {
-                    const res = await fetch(`/api/owner/dashboard-data/${currentUserId}`);
-                    const d = await res.json();
-                    if (d.status !== "ok") {
-                        alert(d.message || "Access denied.");
-                        closeOwnerModal();
-                        return;
-                    }
-
-                    document.getElementById("ownerStatUsers").innerText = d.total_users;
-                    document.getElementById("ownerStatComplaints").innerText = d.total_complaints;
-                    document.getElementById("ownerStatSessions").innerText = d.total_sessions;
-
-                    // Render Complaints
-                    const cContainer = document.getElementById("ownerComplaintsContainer");
-                    if (d.complaints && d.complaints.length > 0) {
-                        cContainer.innerHTML = d.complaints.map(c => `
-                            <div style="padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.06);">
-                                <div style="display:flex; justify-content:space-between; margin-bottom:3px;">
-                                    <b style="color:#fde047;">${c.username}</b>
-                                    <span style="font-size:10px; color:#94a3b8;">${c.created_at}</span>
-                                </div>
-                                <span style="font-size:11px; background:rgba(250,204,21,0.15); color:#facc15; padding:2px 6px; border-radius:6px;">${c.category}</span>
-                                <div style="margin-top:5px; color:#e2e8f0; font-size:12px;">${c.message}</div>
-                            </div>
-                        `).join("");
-                    } else {
-                        cContainer.innerHTML = "No complaints submitted yet.";
-                    }
-
-                    // Render Users
-                    const uContainer = document.getElementById("ownerUsersContainer");
-                    if (d.users && d.users.length > 0) {
-                        uContainer.innerHTML = `
-                            <table class="data-table">
-                                <thead><tr><th>ID</th><th>User</th><th>Role</th><th>Joined</th></tr></thead>
-                                <tbody>
-                                    ${d.users.map(u => `
-                                        <tr>
-                                            <td>\${u.id}</td>
-                                            <td><b>\${u.username}</b></td>
-                                            <td><span style="color:${u.role === 'owner' ? '#facc15' : '#94a3b8'};">${u.role}</span></td>
-                                            <td style="font-size:10.5px;">\${u.created_at}</td>
-                                        </tr>
-                                    `).join("")}
-                                </tbody>
-                            </table>
-                        `;
-                    } else {
-                        uContainer.innerHTML = "No users found.";
-                    }
-                } catch(e) {
-                    console.error("Owner console fetch error:", e);
-                }
-            }
-
-            /* --- CAMERA & HARDWARE CONTROLS --- */
             async function requestCameraAccess() {
-                dockStatus.innerText = "● Requesting optical camera authorization...";
+                dockStatus.innerText = "● Requesting optical camera...";
                 cameraModal.style.display = "flex";
-                
                 const constraintsList = [
                     { video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 } } },
                     { video: { facingMode: "user" } },
                     { video: true }
                 ];
-
-                let streamAcquired = false;
+                let acquired = false;
                 for (const c of constraintsList) {
                     try {
                         cameraStream = await navigator.mediaDevices.getUserMedia(c);
                         cameraVideo.srcObject = cameraStream;
-                        streamAcquired = true;
+                        acquired = true;
                         dockStatus.innerText = "● Camera verified & active.";
                         break;
-                    } catch (err) {
-                        console.warn("Retrying optical constraint...", err);
-                    }
+                    } catch (e) {}
                 }
-
-                if (!streamAcquired) {
-                    alert("Camera authorization was declined or hardware was not found. You can upload an image file directly.");
+                if (!acquired) {
+                    alert("Camera permission declined or not found. You can upload an image directly.");
                     closeCamera();
                     document.getElementById("fileUploadInput").click();
                 }
             }
-
             function closeCamera() {
-                if (cameraStream) {
-                    cameraStream.getTracks().forEach(t => t.stop());
-                    cameraStream = null;
-                }
+                if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); cameraStream = null; }
                 cameraModal.style.display = "none";
                 dockStatus.innerText = "● Ready";
             }
-
             function resizeImage(source, maxWidth = 1024, maxHeight = 1024, quality = 0.8) {
                 return new Promise((resolve) => {
                     const img = new Image();
                     img.onload = () => {
-                        let width = img.width;
-                        let height = img.height;
+                        let width = img.width, height = img.height;
                         if (width > height) {
-                            if (width > maxWidth) {
-                                height = Math.round((height * maxWidth) / width);
-                                width = maxWidth;
-                            }
+                            if (width > maxWidth) { height = Math.round((height * maxWidth) / width); width = maxWidth; }
                         } else {
-                            if (height > maxHeight) {
-                                width = Math.round((width * maxHeight) / height);
-                                height = maxHeight;
-                            }
+                            if (height > maxHeight) { width = Math.round((width * maxHeight) / height); height = maxHeight; }
                         }
                         const canvas = document.createElement("canvas");
-                        canvas.width = width;
-                        canvas.height = height;
-                        const ctx = canvas.getContext("2d");
-                        ctx.drawImage(img, 0, 0, width, height);
+                        canvas.width = width; canvas.height = height;
+                        canvas.getContext("2d").drawImage(img, 0, 0, width, height);
                         resolve(canvas.toDataURL("image/jpeg", quality));
                     };
                     img.src = source;
                 });
             }
-
             async function captureSnapshot() {
                 if (!cameraVideo.videoWidth) return;
-                cameraCanvas.width = cameraVideo.videoWidth;
-                cameraCanvas.height = cameraVideo.videoHeight;
-                const ctx = cameraCanvas.getContext("2d");
-                ctx.drawImage(cameraVideo, 0, 0);
+                cameraCanvas.width = cameraVideo.videoWidth; cameraCanvas.height = cameraVideo.videoHeight;
+                cameraCanvas.getContext("2d").drawImage(cameraVideo, 0, 0);
                 const rawB64 = cameraCanvas.toDataURL("image/jpeg", 0.9);
-                const optimizedB64 = await resizeImage(rawB64);
-                setAttachedImage(optimizedB64);
+                const opt = await resizeImage(rawB64);
+                setAttachedImage(opt);
                 closeCamera();
             }
-
             function handleFileUpload(e) {
                 const file = e.target.files[0];
                 if (!file) return;
-                const reader = new FileReader();
-                reader.onload = async (event) => {
-                    const optimizedB64 = await resizeImage(event.target.result);
-                    setAttachedImage(optimizedB64);
+                const r = new FileReader();
+                r.onload = async (event) => {
+                    const opt = await resizeImage(event.target.result);
+                    setAttachedImage(opt);
                     closeCamera();
                 };
-                reader.readAsDataURL(file);
+                r.readAsDataURL(file);
             }
-
             function setAttachedImage(b64) {
                 attachedImageBase64 = b64;
                 imgPreviewThumb.src = b64;
                 imgPreviewBar.style.display = "flex";
-                dockStatus.innerText = "● Visual artifact attached. Ready for multi-modal analysis.";
+                dockStatus.innerText = "● Visual artifact attached.";
             }
-
             function clearAttachedImage() {
                 attachedImageBase64 = null;
                 imgPreviewBar.style.display = "none";
@@ -1297,12 +1468,11 @@ async def serve_app():
 
             async function requestMicAndRecord() {
                 if (!isRecording) {
-                    dockStatus.innerText = "● Requesting microphone authorization...";
+                    dockStatus.innerText = "● Requesting microphone...";
                     try {
                         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                         mediaRecorder = new MediaRecorder(stream);
                         audioChunks = [];
-
                         mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
                         mediaRecorder.onstop = async () => {
                             const blob = new Blob(audioChunks, { type: 'audio/wav' });
@@ -1310,24 +1480,22 @@ async def serve_app():
                             uploadVoice(blob);
                             stream.getTracks().forEach(t => t.stop());
                         };
-
                         mediaRecorder.start();
                         isRecording = true;
                         micBtn.classList.add("active-record");
-                        dockStatus.innerText = "🔴 Listening... Tap microphone icon again to transmit.";
+                        dockStatus.innerText = "🔴 Listening... Tap mic to transmit.";
                     } catch (err) {
-                        alert("Microphone permission was denied. Please allow microphone access in your browser settings.");
+                        alert("Microphone permission denied.");
                         dockStatus.innerText = "● Mic access denied.";
                     }
                 } else {
                     isRecording = false;
                     micBtn.classList.remove("active-record");
-                    setThinking(true, "Processing synthesized voice input...");
+                    setThinking(true, "Processing voice input...");
                     if (mediaRecorder) mediaRecorder.stop();
                 }
             }
 
-            /* --- CHAMBERS & CORE ISOLATION --- */
             async function switchDedicatedChamber(mode) {
                 currentCoreMode = mode;
                 localStorage.setItem("lemon_active_core", mode);
@@ -1342,17 +1510,14 @@ async def serve_app():
                         const data = await res.json();
                         currentSessionId = data.session_id;
                         localStorage.setItem("lemon_current_session_id", currentSessionId.toString());
-                        
                         chatStream.innerHTML = "";
                         heroGreeting.style.display = "flex";
                         heroGreetingName.innerText = `${mode.toUpperCase()} Chamber Activated`;
                         heroGreetingSub.innerText = `Dedicated cognitive isolation mode: ${mode.toUpperCase()}. Previous core contexts will not bleed into this session.`;
                         closeSidebar();
                         loadSessionsList();
-                        dockStatus.innerText = `● Session bound strictly to ${mode.toUpperCase()}`;
-                    } catch(e) {
-                        console.error("Session creation error:", e);
-                    }
+                        dockStatus.innerText = `● Session bound to ${mode.toUpperCase()}`;
+                    } catch(e) {}
                 }
             }
 
@@ -1363,7 +1528,6 @@ async def serve_app():
                 currentChamberBadge.innerText = `⚡ ${currentCoreMode.toUpperCase()}`;
             }
 
-            /* --- AUTH FLOW --- */
             function checkAuth() {
                 updateChamberUI();
                 if (currentUserId && currentUserId !== "null" && currentUserId !== "undefined") {
@@ -1371,13 +1535,12 @@ async def serve_app():
                     sidebarUsername.innerText = currentUsername;
                     heroGreetingName.innerText = `Welcome, ${currentUsername}!`;
 
-                    // Check if owner
                     if (currentUsername.toLowerCase() === "utkarsh" || currentUserRole === "owner") {
                         ownerMenuBtn.style.display = "block";
                     } else {
                         ownerMenuBtn.style.display = "none";
                     }
-
+                    sendHeartbeat();
                     initHistory();
                 } else {
                     authModal.style.display = "flex";
@@ -1403,7 +1566,6 @@ async def serve_app():
             async function handleAuthSubmit() {
                 const u = document.getElementById("authUsername").value.trim();
                 const p = document.getElementById("authPassword").value.trim();
-                
                 authErrorMsg.style.display = "none";
                 if (!u || !p) {
                     authErrorMsg.innerText = "Username and password required.";
@@ -1415,7 +1577,6 @@ async def serve_app():
                 const fd = new FormData();
                 fd.append("username", u);
                 fd.append("password", p);
-
                 authSubmitBtn.innerText = "Synchronizing...";
                 try {
                     const res = await fetch(endpoint, { method: "POST", body: fd });
@@ -1433,7 +1594,7 @@ async def serve_app():
                         checkAuth();
                     } else if (res.status === 404 && !isAuthRegister) {
                         toggleAuthMode();
-                        authErrorMsg.innerText = "User not found. Click 'Create Account' below to register.";
+                        authErrorMsg.innerText = "User not found. Click 'Create Account' below.";
                         authErrorMsg.style.display = "block";
                     } else {
                         authErrorMsg.innerText = data.message || "Authentication error.";
@@ -1460,15 +1621,8 @@ async def serve_app():
                 checkAuth();
             }
 
-            function openSidebar() {
-                loadSessionsList();
-                sidebar.classList.add("open");
-                sidebarOverlay.classList.add("open");
-            }
-            function closeSidebar() {
-                sidebar.classList.remove("open");
-                sidebarOverlay.classList.remove("open");
-            }
+            function openSidebar() { loadSessionsList(); sidebar.classList.add("open"); sidebarOverlay.classList.add("open"); }
+            function closeSidebar() { sidebar.classList.remove("open"); sidebarOverlay.classList.remove("open"); }
 
             async function initHistory() {
                 if (!currentUserId) return;
@@ -1484,9 +1638,7 @@ async def serve_app():
                     } else {
                         switchDedicatedChamber(currentCoreMode);
                     }
-                } catch(e) {
-                    console.error("Init history error:", e);
-                }
+                } catch(e) {}
             }
 
             async function loadSessionsList() {
@@ -1510,9 +1662,7 @@ async def serve_app():
                     } else {
                         sessionsList.innerHTML = `<div style="font-size:12px; color:#64748b; padding:10px;">No preserved sessions.</div>`;
                     }
-                } catch(e) {
-                    console.log("Sessions loading error:", e);
-                }
+                } catch(e) {}
             }
 
             async function openSession(id) {
@@ -1534,9 +1684,7 @@ async def serve_app():
                             updateChamberUI();
                         }
                     }
-                } catch(e) {
-                    console.error("Open session error:", e);
-                }
+                } catch(e) {}
                 chatStream.scrollTop = chatStream.scrollHeight;
             }
 
@@ -1566,10 +1714,7 @@ async def serve_app():
                         chatStream.scrollTop = chatStream.scrollHeight;
                     }
                 } else {
-                    if (currentThinkingEl) {
-                        currentThinkingEl.remove();
-                        currentThinkingEl = null;
-                    }
+                    if (currentThinkingEl) { currentThinkingEl.remove(); currentThinkingEl = null; }
                     dockStatus.innerText = "● Chamber Active";
                 }
             }
@@ -1585,9 +1730,7 @@ async def serve_app():
                         audioElement.src = data.audio_base64;
                         audioElement.play();
                     }
-                } catch(e) {
-                    dockStatus.innerText = "Audio playback fault.";
-                }
+                } catch(e) { dockStatus.innerText = "Audio playback fault."; }
             }
 
             function copyMessage(text, btn) {
@@ -1603,7 +1746,6 @@ async def serve_app():
 
                 const group = document.createElement("div");
                 group.className = `bubble-group ${sender}`;
-
                 let html = "";
                 let imgTag = imageData ? `<img src="${imageData}" class="chat-img-thumb" alt="analyzed visual artifact">` : "";
 
@@ -1634,7 +1776,6 @@ async def serve_app():
                         </div>
                     `;
                 }
-
                 group.innerHTML = html;
                 chatStream.appendChild(group);
                 chatStream.scrollTop = chatStream.scrollHeight;
@@ -1643,7 +1784,6 @@ async def serve_app():
             async function sendTextQuery() {
                 const text = textInput.value.trim();
                 const imageToSend = attachedImageBase64;
-
                 if (!text && !imageToSend) return;
 
                 textInput.value = "";
@@ -1667,13 +1807,11 @@ async def serve_app():
                     localStorage.setItem("lemon_current_session_id", currentSessionId.toString());
 
                     appendMessage("lemon", data.reply_text, data.emotion);
-
                     if (data.audio_base64) {
                         audioElement.src = data.audio_base64;
-                        audioElement.play().catch(e => console.log("Audio autoplay prevented:", e));
+                        audioElement.play().catch(e => {});
                     }
                 } catch(e) {
-                    console.error("Transmission error:", e);
                     setThinking(false);
                     dockStatus.innerText = "Network sync fault. Re-transmit.";
                 }
@@ -1702,10 +1840,9 @@ async def serve_app():
 
                     if (data.audio_base64) {
                         audioElement.src = data.audio_base64;
-                        audioElement.play().catch(e => console.log("Audio autoplay prevented:", e));
+                        audioElement.play().catch(e => {});
                     }
                 } catch(e) {
-                    console.error("Voice processing fault:", e);
                     setThinking(false);
                     dockStatus.innerText = "Voice transmission fault.";
                 }
