@@ -18,7 +18,9 @@ PART2 = "b3FYnQHV93Lkgjmz4CtDJ1IpMfy4"
 GROQ_API_KEY = os.getenv("GROQ_API_KEY") or (PART1 + PART2)
 client = Groq(api_key=GROQ_API_KEY)
 
-app = FastAPI(title="Lemon AI - High Intellect & Isolated Cognitive Chambers")
+OWNER_USERNAME = "utkarsh"  # Only this username has Owner Console access
+
+app = FastAPI(title="Lemon AI - High Intellect & Owner Console Edition")
 
 app.add_middleware(
     CORSMiddleware,
@@ -44,6 +46,7 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'user',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -68,6 +71,17 @@ def init_db():
                 image_data TEXT,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY(session_id) REFERENCES sessions(id)
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS complaints (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                username TEXT NOT NULL,
+                category TEXT NOT NULL,
+                message TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(user_id) REFERENCES users(id)
             )
         """)
         conn.commit()
@@ -220,7 +234,6 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
 
         return "Visual transmission processing anomaly. Re-supply image under clean lighting or higher contrast.", "Formidable"
 
-    # Text Reasoning
     text_models = ["llama-3.1-8b-instant", "openai/gpt-oss-20b", "openai/gpt-oss-120b"]
     messages = [{"role": "system", "content": instruction}]
     for h in history[-8:]:
@@ -251,6 +264,7 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
 
     return "Cognitive process briefly desynchronized. Articulate your core premise again.", "Serene"
 
+# ----------------- AUTH & USER MANAGEMENT -----------------
 @app.post("/api/register")
 def register_user(username: str = Form(...), password: str = Form(...)):
     username = username.strip().lower()
@@ -261,12 +275,13 @@ def register_user(username: str = Form(...), password: str = Form(...)):
     cur = conn.cursor()
     try:
         pwd_hash = hash_password(password)
-        cur.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)", (username, pwd_hash))
+        user_role = "owner" if username == OWNER_USERNAME.lower() else "user"
+        cur.execute("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)", (username, pwd_hash, user_role))
         conn.commit()
         user_id = cur.lastrowid
-        return JSONResponse({"status": "ok", "user_id": user_id, "username": username})
+        return JSONResponse({"status": "ok", "user_id": user_id, "username": username, "role": user_role})
     except sqlite3.IntegrityError:
-        return JSONResponse({"status": "error", "message": "Username already exists. Select Sign In or choose another name."}, status_code=400)
+        return JSONResponse({"status": "error", "message": "Username already exists. Select Sign In."}, status_code=400)
     finally:
         conn.close()
 
@@ -278,15 +293,15 @@ def login_user(username: str = Form(...), password: str = Form(...)):
     conn = get_db()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT id, username FROM users WHERE username = ? AND password_hash = ?", (username, pwd_hash))
+        cur.execute("SELECT id, username, role FROM users WHERE username = ? AND password_hash = ?", (username, pwd_hash))
         user = cur.fetchone()
         if user:
-            return JSONResponse({"status": "ok", "user_id": user[0], "username": user[1]})
+            return JSONResponse({"status": "ok", "user_id": user[0], "username": user[1], "role": user[2]})
         
         cur.execute("SELECT id FROM users WHERE username = ?", (username,))
         exists = cur.fetchone()
         if not exists:
-            return JSONResponse({"status": "not_found", "message": "Account not registered. Switch to 'Create Account' below."}, status_code=404)
+            return JSONResponse({"status": "not_found", "message": "Account not registered. Switch to 'Create Account'."}, status_code=404)
         
         return JSONResponse({"status": "error", "message": "Credentials mismatch. Verify password."}, status_code=401)
     finally:
@@ -331,34 +346,6 @@ def new_core_session(user_id: int = Form(...), core_mode: str = Form(...)):
     finally:
         conn.close()
 
-@app.post("/api/restore-backup")
-def restore_backup(user_id: int = Form(...), sessions_json: str = Form(...)):
-    try:
-        data = json.loads(sessions_json)
-        conn = get_db()
-        cur = conn.cursor()
-        try:
-            for sess in data:
-                cur.execute("SELECT id FROM sessions WHERE user_id = ? AND id = ?", (user_id, sess.get("id")))
-                existing = cur.fetchone()
-                if not existing:
-                    cur.execute(
-                        "INSERT INTO sessions (id, user_id, title, core_mode) VALUES (?, ?, ?, ?)",
-                        (sess.get("id"), user_id, sess.get("title", "Chamber"), sess.get("core_mode", "intellect"))
-                    )
-                    s_id = sess.get("id")
-                    for msg in sess.get("messages", []):
-                        cur.execute(
-                            "INSERT INTO messages (session_id, role, content, mode, emotion, image_data) VALUES (?, ?, ?, ?, ?, ?)",
-                            (s_id, msg.get("role", "user"), msg.get("content", ""), msg.get("mode", "intellect"), msg.get("emotion"), msg.get("image_data"))
-                        )
-            conn.commit()
-            return JSONResponse({"status": "ok"})
-        finally:
-            conn.close()
-    except Exception as e:
-        return JSONResponse({"status": "error", "message": str(e)}, status_code=400)
-
 @app.post("/api/delete-session")
 def delete_session(session_id: int = Form(...)):
     conn = get_db()
@@ -368,6 +355,60 @@ def delete_session(session_id: int = Form(...)):
         cur.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
         conn.commit()
         return JSONResponse({"status": "ok"})
+    finally:
+        conn.close()
+
+# ----------------- COMPLAINTS & OWNER CONSOLE APIS -----------------
+@app.post("/api/complaints/submit")
+def submit_complaint(
+    user_id: int = Form(...),
+    username: str = Form(...),
+    category: str = Form("General Feedback"),
+    message: str = Form(...)
+):
+    msg = message.strip()
+    if not msg:
+        return JSONResponse({"status": "error", "message": "Message cannot be empty."}, status_code=400)
+
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "INSERT INTO complaints (user_id, username, category, message) VALUES (?, ?, ?, ?)",
+            (user_id, username, category, msg)
+        )
+        conn.commit()
+        return JSONResponse({"status": "ok", "message": "Feedback submitted successfully."})
+    finally:
+        conn.close()
+
+@app.get("/api/owner/dashboard-data/{user_id}")
+def get_owner_dashboard(user_id: int):
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT username, role FROM users WHERE id = ?", (user_id,))
+        row = cur.fetchone()
+        if not row or (row[0].lower() != OWNER_USERNAME.lower() and row[1] != "owner"):
+            return JSONResponse({"status": "error", "message": "Access Denied. Owner level verification required."}, status_code=403)
+
+        cur.execute("SELECT id, username, role, created_at FROM users ORDER BY id DESC")
+        users_list = [{"id": r[0], "username": r[1], "role": r[2], "created_at": r[3]} for r in cur.fetchall()]
+
+        cur.execute("SELECT id, username, category, message, created_at FROM complaints ORDER BY id DESC")
+        complaints_list = [{"id": r[0], "username": r[1], "category": r[2], "message": r[3], "created_at": r[4]} for r in cur.fetchall()]
+
+        cur.execute("SELECT COUNT(*) FROM sessions")
+        total_sessions = cur.fetchone()[0]
+
+        return JSONResponse({
+            "status": "ok",
+            "total_users": len(users_list),
+            "total_complaints": len(complaints_list),
+            "total_sessions": total_sessions,
+            "users": users_list,
+            "complaints": complaints_list
+        })
     finally:
         conn.close()
 
@@ -556,32 +597,63 @@ async def serve_app():
             }
             ::-webkit-scrollbar-thumb:hover { background: linear-gradient(180deg, #fde047 0%, #eab308 100%); border-width: 2px; }
 
-            /* --- AUTH MODAL --- */
-            .auth-overlay {
+            /* --- MODALS (AUTH / FEEDBACK / OWNER) --- */
+            .overlay-modal {
                 position: fixed; inset: 0; background: rgba(5, 7, 15, 0.94); backdrop-filter: blur(20px);
-                display: flex; align-items: center; justify-content: center; z-index: 3000;
+                display: none; align-items: center; justify-content: center; z-index: 3000;
             }
-            .auth-card {
+            .modal-card {
                 background: var(--card-surface); border: 1px solid var(--card-border); border-radius: 24px;
-                padding: 32px 26px; width: 90%; max-width: 380px; box-shadow: 0 10px 40px rgba(0,0,0,0.8);
+                padding: 30px 26px; width: 90%; max-width: 420px; box-shadow: 0 10px 40px rgba(0,0,0,0.85);
             }
-            .auth-card h2 { font-size: 21px; font-weight: 700; margin-bottom: 6px; font-family: 'Space Grotesk', sans-serif; }
-            .auth-card p { font-size: 13px; color: var(--text-muted); margin-bottom: 18px; line-height: 1.4; }
-            .auth-input {
+            .modal-card h2 { font-size: 20px; font-weight: 700; margin-bottom: 6px; font-family: 'Space Grotesk', sans-serif; }
+            .modal-card p { font-size: 13px; color: var(--text-muted); margin-bottom: 16px; line-height: 1.4; }
+            .styled-input, .styled-textarea, .styled-select {
                 width: 100%; background: rgba(30, 41, 59, 0.8); border: 1px solid var(--card-border);
-                border-radius: 14px; padding: 13px 14px; color: #fff; font-size: 15px; margin-bottom: 12px; outline: none;
+                border-radius: 14px; padding: 12px 14px; color: #fff; font-size: 14px; margin-bottom: 12px; outline: none;
             }
-            .auth-input:focus { border-color: var(--primary); }
+            .styled-textarea { height: 90px; resize: none; }
+            .styled-input:focus, .styled-textarea:focus { border-color: var(--primary); }
+            .action-submit-btn {
+                width: 100%; background: linear-gradient(135deg, #facc15, #f59e0b); border: none; border-radius: 14px;
+                padding: 13px; color: #0b0f19; font-weight: 700; font-size: 14.5px; cursor: pointer;
+            }
             .auth-error {
                 display: none; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4);
                 color: #fca5a5; font-size: 12.5px; padding: 8px 12px; border-radius: 10px; margin-bottom: 12px;
             }
-            .auth-btn {
-                width: 100%; background: linear-gradient(135deg, #facc15, #f59e0b); border: none; border-radius: 14px;
-                padding: 13px; color: #0b0f19; font-weight: 700; font-size: 15px; cursor: pointer; margin-top: 4px;
+
+            /* --- OWNER CONSOLE FULL MODAL --- */
+            .owner-modal-card {
+                background: #090e1a; border: 1px solid rgba(250, 204, 21, 0.3); border-radius: 24px;
+                padding: 24px; width: 92%; max-width: 650px; max-height: 85vh; display: flex; flex-direction: column;
+                box-shadow: 0 10px 50px rgba(0,0,0,0.9);
             }
-            .auth-switch { text-align: center; margin-top: 16px; font-size: 13px; color: var(--text-muted); cursor: pointer; }
-            .auth-switch span { color: var(--primary); font-weight: 600; text-decoration: underline; }
+            .owner-header {
+                display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--card-border);
+                padding-bottom: 12px; margin-bottom: 16px;
+            }
+            .stat-badge-grid {
+                display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 16px;
+            }
+            .stat-badge {
+                background: rgba(30, 41, 59, 0.5); border: 1px solid var(--card-border); border-radius: 12px;
+                padding: 10px; text-align: center;
+            }
+            .stat-badge b { font-size: 18px; color: #fde047; font-family: 'Space Grotesk', sans-serif; display: block; }
+            .stat-badge span { font-size: 11px; color: var(--text-muted); text-transform: uppercase; }
+            .owner-data-scroll {
+                flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding-right: 4px;
+            }
+            .console-card {
+                background: rgba(18, 24, 38, 0.7); border: 1px solid var(--card-border); border-radius: 14px; padding: 12px;
+            }
+            .console-card-title {
+                font-size: 12px; font-weight: 700; color: #facc15; text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.5px;
+            }
+            .data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+            .data-table th, .data-table td { padding: 8px 6px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.06); }
+            .data-table th { color: var(--text-muted); font-size: 11px; text-transform: uppercase; }
 
             /* --- APP HEADER --- */
             .header {
@@ -608,7 +680,7 @@ async def serve_app():
                 padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
             }
 
-            /* --- SIDEBAR & ISOLATED CHAMBERS --- */
+            /* --- SIDEBAR & CHAMBERS --- */
             .sidebar-overlay {
                 position: fixed; inset: 0; background: rgba(5, 7, 15, 0.75); backdrop-filter: blur(10px);
                 z-index: 1000; opacity: 0; pointer-events: none; transition: opacity 0.3s ease;
@@ -624,23 +696,23 @@ async def serve_app():
             .sidebar.open { transform: translateX(0); }
 
             .sidebar-header {
-                display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; padding-bottom: 12px;
+                display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; padding-bottom: 10px;
                 border-bottom: 1px solid var(--card-border);
             }
             .sidebar-close { font-size: 20px; color: var(--text-muted); cursor: pointer; border: none; background: none; }
 
             .sidebar-section-title {
                 font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700;
-                letter-spacing: 0.6px; margin: 12px 0 8px;
+                letter-spacing: 0.6px; margin: 10px 0 6px;
             }
 
             .core-btn-grid {
-                display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 12px;
+                display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px;
             }
             .core-choice {
                 background: rgba(30, 41, 59, 0.6); border: 1px solid var(--card-border); color: var(--text-muted);
-                padding: 9px 6px; border-radius: 10px; font-size: 11.5px; font-weight: 600; cursor: pointer; text-align: center;
-                display: flex; align-items: center; justify-content: center; gap: 5px; transition: all 0.2s;
+                padding: 8px 6px; border-radius: 10px; font-size: 11.5px; font-weight: 600; cursor: pointer; text-align: center;
+                display: flex; align-items: center; justify-content: center; gap: 4px; transition: all 0.2s;
             }
             .core-choice:hover { background: rgba(250, 204, 21, 0.15); color: #fff; }
             .core-choice.selected {
@@ -648,19 +720,30 @@ async def serve_app():
             }
 
             .sessions-list {
-                flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px;
+                flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px;
             }
             .session-item {
-                display: flex; align-items: center; justify-content: space-between; padding: 10px 12px;
+                display: flex; align-items: center; justify-content: space-between; padding: 9px 12px;
                 background: rgba(30, 41, 59, 0.4); border: 1px solid var(--card-border); border-radius: 12px;
                 cursor: pointer; transition: all 0.2s;
             }
             .session-item:hover, .session-item.active {
                 background: rgba(250, 204, 21, 0.12); border-color: rgba(250, 204, 21, 0.3);
             }
-            .session-title { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
+            .session-title { font-size: 12.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 190px; }
             .session-delete { color: #f87171; font-size: 13px; opacity: 0.6; padding: 2px 6px; }
             .session-delete:hover { opacity: 1; }
+
+            .owner-menu-btn {
+                display: none; background: rgba(250, 204, 21, 0.12); border: 1px solid rgba(250, 204, 21, 0.35);
+                color: #fde047; padding: 8px; border-radius: 12px; font-weight: 700; font-size: 12px;
+                text-align: center; cursor: pointer; margin-bottom: 8px;
+            }
+            .feedback-menu-btn {
+                background: rgba(255, 255, 255, 0.06); border: 1px solid var(--card-border);
+                color: #cbd5e1; padding: 8px; border-radius: 12px; font-weight: 600; font-size: 12px;
+                text-align: center; cursor: pointer; margin-bottom: 8px;
+            }
 
             /* --- CHAT CANVAS --- */
             .chat-container {
@@ -799,34 +882,86 @@ async def serve_app():
                 <video class="camera-video" id="cameraVideo" autoplay playsinline muted></video>
                 <canvas id="cameraCanvas" style="display:none;"></canvas>
                 <div class="camera-ctrls">
-                    <button class="new-chat-btn" style="background:var(--primary); color:#000;" onclick="captureSnapshot()">📸 Capture</button>
-                    <label class="new-chat-btn" style="cursor:pointer; background:rgba(255,255,255,0.08); color:#fff;">
+                    <button class="action-submit-btn" style="width:auto; padding:10px 20px;" onclick="captureSnapshot()">📸 Capture</button>
+                    <label class="action-submit-btn" style="width:auto; padding:10px 20px; cursor:pointer; background:rgba(255,255,255,0.08); color:#fff;">
                         📁 Upload
                         <input type="file" id="fileUploadInput" accept="image/*" style="display:none;" onchange="handleFileUpload(event)">
                     </label>
-                    <button class="new-chat-btn" style="background:#ef4444; color:#fff;" onclick="closeCamera()">✕ Cancel</button>
+                    <button class="action-submit-btn" style="width:auto; padding:10px 20px; background:#ef4444; color:#fff;" onclick="closeCamera()">✕ Cancel</button>
                 </div>
             </div>
         </div>
 
-        <!-- Authentication -->
-        <div class="auth-overlay" id="authModal">
-            <div class="auth-card">
+        <!-- AUTH MODAL -->
+        <div class="overlay-modal" id="authModal" style="display:none;">
+            <div class="modal-card">
                 <h2 id="authHeading">Access Lemon AI</h2>
-                <p id="authSub">Sign in or create account to preserve isolated cognitive sessions.</p>
+                <p id="authSub">Sign in or create account to preserve isolated cognitive chambers.</p>
                 <div class="auth-error" id="authErrorMsg"></div>
-                <input type="text" id="authUsername" class="auth-input" placeholder="Username" autocomplete="off" />
-                <input type="password" id="authPassword" class="auth-input" placeholder="Password" />
-                <button class="auth-btn" id="authSubmitBtn" onclick="handleAuthSubmit()">Enter System</button>
-                <div class="auth-switch" onclick="toggleAuthMode()">
-                    <span id="authToggleText">No account? Create one</span>
+                <input type="text" id="authUsername" class="styled-input" placeholder="Username" autocomplete="off" />
+                <input type="password" id="authPassword" class="styled-input" placeholder="Password" />
+                <button class="action-submit-btn" id="authSubmitBtn" onclick="handleAuthSubmit()">Enter System</button>
+                <div style="text-align:center; margin-top:14px; font-size:13px; color:var(--text-muted); cursor:pointer;" onclick="toggleAuthMode()">
+                    <span id="authToggleText" style="color:var(--primary); font-weight:600; text-decoration:underline;">No account? Create one</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- USER FEEDBACK / COMPLAINT MODAL -->
+        <div class="overlay-modal" id="feedbackModal">
+            <div class="modal-card">
+                <h2>💬 Report Issue / Feedback</h2>
+                <p>Submit bugs, suggestions, or complaints directly to the engineering team.</p>
+                <select id="feedbackCategory" class="styled-select">
+                    <option value="Bug / Error">Bug / App Crash</option>
+                    <option value="Vision Problem">Camera / Vision Issue</option>
+                    <option value="Feature Request">New Feature Idea</option>
+                    <option value="General Feedback">General Thoughts</option>
+                </select>
+                <textarea id="feedbackMessage" class="styled-textarea" placeholder="Explain the problem or request clearly..."></textarea>
+                <div style="display:flex; gap:10px;">
+                    <button class="action-submit-btn" onclick="sendComplaint()">Submit</button>
+                    <button class="action-submit-btn" style="background:rgba(255,255,255,0.08); color:#fff;" onclick="closeFeedbackModal()">Cancel</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECRET OWNER CONSOLE MODAL -->
+        <div class="overlay-modal" id="ownerConsoleModal">
+            <div class="owner-modal-card">
+                <div class="owner-header">
+                    <div>
+                        <h2 style="font-size:18px; color:#facc15;">🛡️ Secret Owner Console</h2>
+                        <div style="font-size:11.5px; color:var(--text-muted);">Verified Owner: <b>Utkarsh Bandhu</b></div>
+                    </div>
+                    <button onclick="closeOwnerModal()" style="background:none; border:none; color:#f87171; font-size:22px; cursor:pointer;">✕</button>
+                </div>
+
+                <div class="stat-badge-grid">
+                    <div class="stat-badge"><b id="ownerStatUsers">0</b><span>Registered Users</span></div>
+                    <div class="stat-badge"><b id="ownerStatComplaints">0</b><span>Reports / Complaints</span></div>
+                    <div class="stat-badge"><b id="ownerStatSessions">0</b><span>Total Sessions</span></div>
+                </div>
+
+                <div class="owner-data-scroll">
+                    <!-- Complaints Section -->
+                    <div class="console-card">
+                        <div class="console-card-title">🚨 Recent Complaints & Feedback</div>
+                        <div id="ownerComplaintsContainer" style="font-size:12px; color:var(--text-muted);">Loading complaints...</div>
+                    </div>
+
+                    <!-- Users Section -->
+                    <div class="console-card">
+                        <div class="console-card-title">👥 Registered Accounts</div>
+                        <div id="ownerUsersContainer" style="font-size:12px; color:var(--text-muted);">Loading users...</div>
+                    </div>
                 </div>
             </div>
         </div>
 
         <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
 
-        <!-- Sidebar with Dedicated Chambers -->
+        <!-- Sidebar -->
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-header">
                 <div>
@@ -836,7 +971,13 @@ async def serve_app():
                 <button class="sidebar-close" onclick="closeSidebar()">✕</button>
             </div>
 
-            <div class="sidebar-section-title">Launch Specific Core Session</div>
+            <!-- Secret Owner Entry (Visible only to Utkarsh) -->
+            <button class="owner-menu-btn" id="ownerMenuBtn" onclick="openOwnerConsole()">🛡️ Open Owner Console</button>
+
+            <!-- User Feedback Button -->
+            <button class="feedback-menu-btn" onclick="openFeedbackModal()">💬 Report Issue / Feedback</button>
+
+            <div class="sidebar-section-title">Launch Specific Chamber</div>
             <div class="core-btn-grid">
                 <button class="core-choice" id="core-intellect" onclick="switchDedicatedChamber('intellect')">⚡ Intellect</button>
                 <button class="core-choice" id="core-rage" onclick="switchDedicatedChamber('rage')">🔥 Rage</button>
@@ -853,9 +994,9 @@ async def serve_app():
             <div class="sidebar-section-title">Saved Discussions</div>
             <div class="sessions-list" id="sessionsList"></div>
 
-            <div style="margin-top:auto; padding-top:14px; border-top:1px solid var(--card-border);">
+            <div style="margin-top:auto; padding-top:12px; border-top:1px solid var(--card-border);">
                 <div style="font-size:12px; color:#94a3b8; margin-bottom:6px;">Signed in: <b id="sidebarUsername" style="color:#fff;">Guest</b></div>
-                <button class="new-chat-btn" style="width:100%; justify-content:center; color:#f87171; border-color:rgba(248,113,113,0.3); background:none;" onclick="logout()">Terminate Session</button>
+                <button class="action-submit-btn" style="width:100%; padding:8px; font-size:12px; color:#f87171; border:1px solid rgba(248,113,113,0.3); background:none;" onclick="logout()">Terminate Session</button>
             </div>
         </aside>
 
@@ -906,6 +1047,7 @@ async def serve_app():
         <script>
             let currentUserId = localStorage.getItem("lemon_user_id");
             let currentUsername = localStorage.getItem("lemon_username") || "Thinker";
+            let currentUserRole = localStorage.getItem("lemon_user_role") || "user";
             let currentSessionId = parseInt(localStorage.getItem("lemon_current_session_id") || "0");
             let currentCoreMode = localStorage.getItem("lemon_active_core") || "intellect";
             let isAuthRegister = false;
@@ -923,6 +1065,10 @@ async def serve_app():
             const authSub = document.getElementById("authSub");
             const authSubmitBtn = document.getElementById("authSubmitBtn");
             const authToggleText = document.getElementById("authToggleText");
+
+            const feedbackModal = document.getElementById("feedbackModal");
+            const ownerConsoleModal = document.getElementById("ownerConsoleModal");
+            const ownerMenuBtn = document.getElementById("ownerMenuBtn");
 
             const sidebar = document.getElementById("sidebar");
             const sidebarOverlay = document.getElementById("sidebarOverlay");
@@ -944,14 +1090,111 @@ async def serve_app():
             const imgPreviewBar = document.getElementById("imgPreviewBar");
             const imgPreviewThumb = document.getElementById("imgPreviewThumb");
 
-            /* ============================================================
-               1. NATIVE HARDWARE PERMISSION REQUEST ENGINE (MIC & CAMERA)
-               ============================================================ */
+            /* --- FEEDBACK / COMPLAINT LOGIC --- */
+            function openFeedbackModal() {
+                closeSidebar();
+                feedbackModal.style.display = "flex";
+            }
+            function closeFeedbackModal() {
+                feedbackModal.style.display = "none";
+                document.getElementById("feedbackMessage").value = "";
+            }
+            async function sendComplaint() {
+                const cat = document.getElementById("feedbackCategory").value;
+                const msg = document.getElementById("feedbackMessage").value.trim();
+                if (!msg) return alert("Please enter your message.");
+
+                const fd = new FormData();
+                fd.append("user_id", currentUserId || 0);
+                fd.append("username", currentUsername || "Anonymous");
+                fd.append("category", cat);
+                fd.append("message", msg);
+
+                try {
+                    const res = await fetch("/api/complaints/submit", { method: "POST", body: fd });
+                    const d = await res.json();
+                    if (d.status === "ok") {
+                        alert("Thank you! Your feedback has been forwarded to Utkarsh.");
+                        closeFeedbackModal();
+                    } else {
+                        alert(d.message || "Failed to submit.");
+                    }
+                } catch(e) {
+                    alert("Submission error.");
+                }
+            }
+
+            /* --- SECRET OWNER CONSOLE --- */
+            function openOwnerConsole() {
+                closeSidebar();
+                ownerConsoleModal.style.display = "flex";
+                loadOwnerDashboardData();
+            }
+            function closeOwnerModal() {
+                ownerConsoleModal.style.display = "none";
+            }
+            async function loadOwnerDashboardData() {
+                try {
+                    const res = await fetch(`/api/owner/dashboard-data/${currentUserId}`);
+                    const d = await res.json();
+                    if (d.status !== "ok") {
+                        alert(d.message || "Access denied.");
+                        closeOwnerModal();
+                        return;
+                    }
+
+                    document.getElementById("ownerStatUsers").innerText = d.total_users;
+                    document.getElementById("ownerStatComplaints").innerText = d.total_complaints;
+                    document.getElementById("ownerStatSessions").innerText = d.total_sessions;
+
+                    // Render Complaints
+                    const cContainer = document.getElementById("ownerComplaintsContainer");
+                    if (d.complaints && d.complaints.length > 0) {
+                        cContainer.innerHTML = d.complaints.map(c => `
+                            <div style="padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.06);">
+                                <div style="display:flex; justify-content:space-between; margin-bottom:3px;">
+                                    <b style="color:#fde047;">${c.username}</b>
+                                    <span style="font-size:10px; color:#94a3b8;">${c.created_at}</span>
+                                </div>
+                                <span style="font-size:11px; background:rgba(250,204,21,0.15); color:#facc15; padding:2px 6px; border-radius:6px;">${c.category}</span>
+                                <div style="margin-top:5px; color:#e2e8f0; font-size:12px;">${c.message}</div>
+                            </div>
+                        `).join("");
+                    } else {
+                        cContainer.innerHTML = "No complaints submitted yet.";
+                    }
+
+                    // Render Users
+                    const uContainer = document.getElementById("ownerUsersContainer");
+                    if (d.users && d.users.length > 0) {
+                        uContainer.innerHTML = `
+                            <table class="data-table">
+                                <thead><tr><th>ID</th><th>User</th><th>Role</th><th>Joined</th></tr></thead>
+                                <tbody>
+                                    ${d.users.map(u => `
+                                        <tr>
+                                            <td>\${u.id}</td>
+                                            <td><b>\${u.username}</b></td>
+                                            <td><span style="color:${u.role === 'owner' ? '#facc15' : '#94a3b8'};">${u.role}</span></td>
+                                            <td style="font-size:10.5px;">\${u.created_at}</td>
+                                        </tr>
+                                    `).join("")}
+                                </tbody>
+                            </table>
+                        `;
+                    } else {
+                        uContainer.innerHTML = "No users found.";
+                    }
+                } catch(e) {
+                    console.error("Owner console fetch error:", e);
+                }
+            }
+
+            /* --- CAMERA & HARDWARE CONTROLS --- */
             async function requestCameraAccess() {
                 dockStatus.innerText = "● Requesting optical camera authorization...";
                 cameraModal.style.display = "flex";
                 
-                // Explicitly prompt device for video permission
                 const constraintsList = [
                     { video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 } } },
                     { video: { facingMode: "user" } },
@@ -1056,7 +1299,6 @@ async def serve_app():
                 if (!isRecording) {
                     dockStatus.innerText = "● Requesting microphone authorization...";
                     try {
-                        // Explicit browser permission request
                         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                         mediaRecorder = new MediaRecorder(stream);
                         audioChunks = [];
@@ -1074,8 +1316,7 @@ async def serve_app():
                         micBtn.classList.add("active-record");
                         dockStatus.innerText = "🔴 Listening... Tap microphone icon again to transmit.";
                     } catch (err) {
-                        console.error("Mic permission error:", err);
-                        alert("Microphone permission was denied. Please allow microphone access in your browser site settings.");
+                        alert("Microphone permission was denied. Please allow microphone access in your browser settings.");
                         dockStatus.innerText = "● Mic access denied.";
                     }
                 } else {
@@ -1086,15 +1327,12 @@ async def serve_app():
                 }
             }
 
-            /* ============================================================
-               2. DEDICATED ISOLATED COGNITIVE CHAMBERS
-               ============================================================ */
+            /* --- CHAMBERS & CORE ISOLATION --- */
             async function switchDedicatedChamber(mode) {
                 currentCoreMode = mode;
                 localStorage.setItem("lemon_active_core", mode);
                 updateChamberUI();
 
-                // Open dedicated session for this specific core
                 if (currentUserId) {
                     const fd = new FormData();
                     fd.append("user_id", currentUserId);
@@ -1125,16 +1363,22 @@ async def serve_app():
                 currentChamberBadge.innerText = `⚡ ${currentCoreMode.toUpperCase()}`;
             }
 
-            /* ============================================================
-               3. BULLETPROOF PERSISTENCE & AUTH
-               ============================================================ */
+            /* --- AUTH FLOW --- */
             function checkAuth() {
                 updateChamberUI();
                 if (currentUserId && currentUserId !== "null" && currentUserId !== "undefined") {
                     authModal.style.display = "none";
                     sidebarUsername.innerText = currentUsername;
                     heroGreetingName.innerText = `Welcome, ${currentUsername}!`;
-                    initIndexedDB().then(() => initHistory());
+
+                    // Check if owner
+                    if (currentUsername.toLowerCase() === "utkarsh" || currentUserRole === "owner") {
+                        ownerMenuBtn.style.display = "block";
+                    } else {
+                        ownerMenuBtn.style.display = "none";
+                    }
+
+                    initHistory();
                 } else {
                     authModal.style.display = "flex";
                 }
@@ -1181,8 +1425,10 @@ async def serve_app():
                     if (res.ok && data.status === "ok") {
                         currentUserId = data.user_id.toString();
                         currentUsername = data.username;
+                        currentUserRole = data.role || "user";
                         localStorage.setItem("lemon_user_id", currentUserId);
                         localStorage.setItem("lemon_username", currentUsername);
+                        localStorage.setItem("lemon_user_role", currentUserRole);
                         authModal.style.display = "none";
                         checkAuth();
                     } else if (res.status === 404 && !isAuthRegister) {
@@ -1203,65 +1449,15 @@ async def serve_app():
             function logout() {
                 localStorage.removeItem("lemon_user_id");
                 localStorage.removeItem("lemon_username");
+                localStorage.removeItem("lemon_user_role");
                 localStorage.removeItem("lemon_current_session_id");
                 currentUserId = null;
                 currentUsername = "Thinker";
+                currentUserRole = "user";
                 currentSessionId = 0;
                 chatStream.innerHTML = "";
                 closeSidebar();
                 checkAuth();
-            }
-
-            let idb = null;
-            function initIndexedDB() {
-                return new Promise((resolve) => {
-                    try {
-                        const req = indexedDB.open("LemonPermanentDB");
-                        req.onupgradeneeded = (e) => {
-                            const db = e.target.result;
-                            if (!db.objectStoreNames.contains("sessions")) {
-                                db.createObjectStore("sessions", { keyPath: "id" });
-                            }
-                        };
-                        req.onsuccess = (e) => { idb = e.target.result; resolve(idb); };
-                        req.onerror = () => resolve(null);
-                    } catch(e) { resolve(null); }
-                });
-            }
-
-            async function saveSessionToIDB(sessionObj) {
-                if (!idb) await initIndexedDB();
-                if (!idb) return;
-                try {
-                    const tx = idb.transaction("sessions", "readwrite");
-                    tx.objectStore("sessions").put(sessionObj);
-                } catch(e) {}
-            }
-
-            async function getAllSessionsFromIDB(userId) {
-                if (!idb) await initIndexedDB();
-                if (!idb) return [];
-                return new Promise((resolve) => {
-                    try {
-                        const tx = idb.transaction("sessions", "readonly");
-                        const store = tx.objectStore("sessions");
-                        const req = store.getAll();
-                        req.onsuccess = () => {
-                            const results = (req.result || []).filter(s => s.user_id === userId);
-                            resolve(results);
-                        };
-                        req.onerror = () => resolve([]);
-                    } catch(e) { resolve([]); }
-                });
-            }
-
-            async function deleteSessionFromIDB(sessionId) {
-                if (!idb) await initIndexedDB();
-                if (!idb) return;
-                try {
-                    const tx = idb.transaction("sessions", "readwrite");
-                    tx.objectStore("sessions").delete(sessionId);
-                } catch(e) {}
             }
 
             function openSidebar() {
@@ -1279,16 +1475,6 @@ async def serve_app():
                 try {
                     const res = await fetch(`/api/sessions/${currentUserId}`);
                     const data = await res.json();
-                    const localIDBSessions = await getAllSessionsFromIDB(currentUserId);
-
-                    if ((!data.sessions || data.sessions.length === 0) && localIDBSessions.length > 0) {
-                        const fd = new FormData();
-                        fd.append("user_id", currentUserId);
-                        fd.append("sessions_json", JSON.stringify(localIDBSessions));
-                        await fetch("/api/restore-backup", { method: "POST", body: fd });
-                        return initHistory();
-                    }
-
                     await loadSessionsList();
 
                     if (currentSessionId && currentSessionId !== 0) {
@@ -1299,8 +1485,7 @@ async def serve_app():
                         switchDedicatedChamber(currentCoreMode);
                     }
                 } catch(e) {
-                    const localIDBSessions = await getAllSessionsFromIDB(currentUserId);
-                    if (localIDBSessions.length > 0) openLocalIDBSession(localIDBSessions[0]);
+                    console.error("Init history error:", e);
                 }
             }
 
@@ -1310,9 +1495,7 @@ async def serve_app():
                     const res = await fetch(`/api/sessions/${currentUserId}`);
                     const data = await res.json();
                     sessionsList.innerHTML = "";
-
-                    let list = data.sessions || [];
-                    if (list.length === 0) list = await getAllSessionsFromIDB(currentUserId);
+                    const list = data.sessions || [];
 
                     if (list.length > 0) {
                         list.forEach(s => {
@@ -1344,31 +1527,16 @@ async def serve_app():
                     const data = await res.json();
                     if (data.messages && data.messages.length > 0) {
                         data.messages.forEach(m => appendMessage(m.role === "assistant" ? "lemon" : "user", m.content, m.emotion, m.image_data));
-                        // Update UI to reflect session's mode
                         const lastMsg = data.messages[data.messages.length - 1];
                         if (lastMsg && lastMsg.mode) {
                             currentCoreMode = lastMsg.mode;
                             localStorage.setItem("lemon_active_core", currentCoreMode);
                             updateChamberUI();
                         }
-                    } else {
-                        const localSessions = await getAllSessionsFromIDB(currentUserId);
-                        const match = localSessions.find(s => s.id === id);
-                        if (match) openLocalIDBSession(match);
                     }
                 } catch(e) {
-                    const localSessions = await getAllSessionsFromIDB(currentUserId);
-                    const match = localSessions.find(s => s.id === id);
-                    if (match) openLocalIDBSession(match);
+                    console.error("Open session error:", e);
                 }
-                chatStream.scrollTop = chatStream.scrollHeight;
-            }
-
-            function openLocalIDBSession(session) {
-                currentSessionId = session.id;
-                heroGreeting.style.display = "none";
-                chatStream.innerHTML = "";
-                session.messages.forEach(m => appendMessage(m.role === "assistant" ? "lemon" : "user", m.content, m.emotion, m.image_data));
                 chatStream.scrollTop = chatStream.scrollHeight;
             }
 
@@ -1378,8 +1546,6 @@ async def serve_app():
                 const fd = new FormData();
                 fd.append("session_id", id);
                 await fetch("/api/delete-session", { method: "POST", body: fd });
-                await deleteSessionFromIDB(id);
-
                 if (currentSessionId === id) switchDedicatedChamber(currentCoreMode);
                 loadSessionsList();
             }
@@ -1500,15 +1666,6 @@ async def serve_app():
                     currentSessionId = data.session_id;
                     localStorage.setItem("lemon_current_session_id", currentSessionId.toString());
 
-                    const existingSessions = await getAllSessionsFromIDB(currentUserId);
-                    let curr = existingSessions.find(s => s.id === currentSessionId);
-                    if (!curr) {
-                        curr = { id: currentSessionId, user_id: currentUserId, title: data.title, core_mode: currentCoreMode, messages: [] };
-                    }
-                    curr.messages.push({ role: "user", content: text, mode: currentCoreMode, image_data: imageToSend });
-                    curr.messages.push({ role: "assistant", content: data.reply_text, mode: currentCoreMode, emotion: data.emotion });
-                    await saveSessionToIDB(curr);
-
                     appendMessage("lemon", data.reply_text, data.emotion);
 
                     if (data.audio_base64) {
@@ -1541,16 +1698,6 @@ async def serve_app():
                     localStorage.setItem("lemon_current_session_id", currentSessionId.toString());
 
                     if (data.user_text) appendMessage("user", data.user_text, null, imageToSend);
-
-                    const existingSessions = await getAllSessionsFromIDB(currentUserId);
-                    let curr = existingSessions.find(s => s.id === currentSessionId);
-                    if (!curr) {
-                        curr = { id: currentSessionId, user_id: currentUserId, title: data.title, core_mode: currentCoreMode, messages: [] };
-                    }
-                    if (data.user_text) curr.messages.push({ role: "user", content: data.user_text, mode: currentCoreMode, image_data: imageToSend });
-                    curr.messages.push({ role: "assistant", content: data.reply_text, mode: currentCoreMode, emotion: data.emotion });
-                    await saveSessionToIDB(curr);
-
                     appendMessage("lemon", data.reply_text, data.emotion);
 
                     if (data.audio_base64) {
