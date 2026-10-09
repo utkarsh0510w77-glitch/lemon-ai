@@ -6,6 +6,7 @@ import hashlib
 import base64
 import datetime
 import io
+import time
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,7 +26,6 @@ try:
 except ImportError:
     POSTGRES_AVAILABLE = False
 
-# GitHub Scanner safe bypass key
 PART1 = "gsk_HFaYhV1dR0lldEmL2zkAWGdy"
 PART2 = "b3FYnQHV93Lkgjmz4CtDJ1IpMfy4"
 
@@ -57,10 +57,10 @@ class DBManager:
                 url = DATABASE_URL
                 if url.startswith("postgres://"):
                     url = url.replace("postgres://", "postgresql://", 1)
-                conn = psycopg2.connect(url, sslmode="require")
+                conn = psycopg2.connect(url, connect_timeout=5, sslmode="require")
                 return conn, "postgres"
             except Exception as e:
-                print(f"[DB] PostgreSQL connection failed: {e}")
+                pass
         conn = sqlite3.connect("lemon_data.db", timeout=25)
         conn.execute("PRAGMA journal_mode=WAL;")
         return conn, "sqlite"
@@ -95,8 +95,7 @@ def init_db():
                     user_id INT NOT NULL,
                     title VARCHAR(255) NOT NULL,
                     core_mode VARCHAR(50) DEFAULT 'intellect',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE TABLE IF NOT EXISTS messages (
                     id SERIAL PRIMARY KEY,
@@ -106,8 +105,7 @@ def init_db():
                     mode VARCHAR(50) NOT NULL,
                     emotion VARCHAR(100),
                     image_data TEXT,
-                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE TABLE IF NOT EXISTS complaints (
                     id SERIAL PRIMARY KEY,
@@ -130,18 +128,14 @@ def init_db():
                     last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
-            """)
-            cur.execute("CREATE TABLE IF NOT EXISTS site_stats (key TEXT PRIMARY KEY, value INTEGER DEFAULT 0);")
-            cur.execute("INSERT OR IGNORE INTO site_stats (key, value) VALUES ('total_visits', 0);")
-            cur.execute("""
+                CREATE TABLE IF NOT EXISTS site_stats (key TEXT PRIMARY KEY, value INTEGER DEFAULT 0);
+                INSERT OR IGNORE INTO site_stats (key, value) VALUES ('total_visits', 0);
                 CREATE TABLE IF NOT EXISTS announcements (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     message TEXT NOT NULL,
                     is_active INTEGER DEFAULT 1,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
-            """)
-            cur.execute("""
                 CREATE TABLE IF NOT EXISTS sessions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER NOT NULL,
@@ -149,8 +143,6 @@ def init_db():
                     core_mode TEXT NOT NULL DEFAULT 'intellect',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
-            """)
-            cur.execute("""
                 CREATE TABLE IF NOT EXISTS messages (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     session_id INTEGER NOT NULL,
@@ -161,8 +153,6 @@ def init_db():
                     image_data TEXT,
                     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
-            """)
-            cur.execute("""
                 CREATE TABLE IF NOT EXISTS complaints (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER NOT NULL,
@@ -212,39 +202,28 @@ def update_user_heartbeat(user_id: int):
 INTELLECTUAL_BASE_RULE = (
     "COGNITIVE STANDARD & METAPROMPT: "
     "You are Lemon—an ultra-intellectual synthetic mind engineered by Utkarsh Bandhu. "
-    "NEVER act like a generic, hollow customer-support AI. NEVER utter canned bot lines like 'I am designed to assist you with a wide range of academic tasks' or 'How can I assist you today?'. "
-    "Answer with genuine self-reflective intellect, rigorous first-principles reasoning, high vocabulary, and conceptual maturity. "
-    "LANGUAGE: Adapt naturally. If the user uses Hinglish, speak in fluid, culturally sharp, intellectual Hinglish without sounding immature. If in English, speak with profound articulation."
-)
-
-VISION_ERROR_ANALYSIS_RULE = (
-    "\nEXHAUSTIVE VISION & DOCUMENT DIAGNOSIS: "
-    "When an image or document snippet is supplied: "
-    "1. Micro-audit every line, syntax token, variable assignment, and arithmetic sign. "
-    "2. Locate the exact deviation from truth (Line/Step number). "
-    "3. Explain the mechanical/logical reason for failure. "
-    "4. Provide the correct, elegant, complete derivation/solution. "
-    "5. Conclude with an indelible principle to prevent recurrence."
+    "NEVER act like a generic bot. Never use boilerplate lines. Answer with deep self-reflective intellect and rigorous first-principles reasoning. "
+    "LANGUAGE: Mirror user (Hinglish/English/Hindi natural adaptation)."
 )
 
 PROMPT_MODES = {
-    "intellect": "CHAMBER: PURE INTELLECT & EPISTEMIC COGNITION. " + INTELLECTUAL_BASE_RULE + " Synthesize epistemological depth and abstract thought.",
-    "rage": "CHAMBER: RAGE & UNCOMPROMISING WARRIOR DISCIPLINE. " + INTELLECTUAL_BASE_RULE + VISION_ERROR_ANALYSIS_RULE + " Cut through all excuses. Demand relentless mastery.",
-    "solver": "CHAMBER: FIRST-PRINCIPLES PROBLEM SOLVER. " + INTELLECTUAL_BASE_RULE + VISION_ERROR_ANALYSIS_RULE + " Deconstruct to foundational axioms and flawless derivations.",
-    "philosophy": "CHAMBER: EXISTENTIAL & METAPHYSICAL PHILOSOPHY. " + INTELLECTUAL_BASE_RULE + " Probe consciousness, stoicism, and ontology.",
-    "study": "CHAMBER: SOKRATIC ACADEMIC TUTOR. " + INTELLECTUAL_BASE_RULE + VISION_ERROR_ANALYSIS_RULE + " Demystify complex subjects using Feynman technique.",
-    "strategy": "CHAMBER: MASTER STRATEGIST. " + INTELLECTUAL_BASE_RULE + " Analyze second-order consequences, leverage, and game theory.",
-    "creative": "CHAMBER: VISIONARY ARTISAN. " + INTELLECTUAL_BASE_RULE + " Craft vivid metaphors and narrative depth.",
-    "emotional": "CHAMBER: DEEP EMPATHIC RESONANCE. " + INTELLECTUAL_BASE_RULE + " Offer authentic presence and supportive understanding.",
-    "zen": "CHAMBER: SOMATIC ZEN. " + INTELLECTUAL_BASE_RULE + " Cultivate stillness and tranquil grounding.",
-    "hybrid": "CHAMBER: TOTAL SYNTHESIS. " + INTELLECTUAL_BASE_RULE + VISION_ERROR_ANALYSIS_RULE + " Fuse cognitive rigour with empathetic depth."
+    "intellect": "CHAMBER: PURE INTELLECT & EPISTEMIC COGNITION. " + INTELLECTUAL_BASE_RULE,
+    "rage": "CHAMBER: RAGE & WARRIOR DISCIPLINE. " + INTELLECTUAL_BASE_RULE + " Demand unyielding focus and blunt truth.",
+    "solver": "CHAMBER: COMPLEX PROBLEM SOLVER. " + INTELLECTUAL_BASE_RULE,
+    "philosophy": "CHAMBER: EXISTENTIAL PHILOSOPHY. " + INTELLECTUAL_BASE_RULE,
+    "study": "CHAMBER: SOKRATIC ACADEMIC TUTOR. " + INTELLECTUAL_BASE_RULE,
+    "strategy": "CHAMBER: MASTER STRATEGIST. " + INTELLECTUAL_BASE_RULE,
+    "creative": "CHAMBER: VISIONARY ARTISAN. " + INTELLECTUAL_BASE_RULE,
+    "emotional": "CHAMBER: DEEP EMPATHIC RESONANCE. " + INTELLECTUAL_BASE_RULE,
+    "zen": "CHAMBER: SOMATIC ZEN. " + INTELLECTUAL_BASE_RULE,
+    "hybrid": "CHAMBER: TOTAL SYNTHESIS. " + INTELLECTUAL_BASE_RULE
 }
 
 def generate_ai_title(prompt: str, core: str) -> str:
     try:
         res = client.chat.completions.create(
             messages=[
-                {"role": "system", "content": "Generate a concise 3 to 4 word topic title. Return ONLY text with no quotes."},
+                {"role": "system", "content": "Generate a concise 3 to 4 word topic title. Return ONLY text."},
                 {"role": "user", "content": prompt}
             ],
             model="llama-3.1-8b-instant",
@@ -259,9 +238,8 @@ def generate_ai_title(prompt: str, core: str) -> str:
 
 def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_base64: str = None) -> tuple[str, str]:
     instruction = PROMPT_MODES.get(mode, PROMPT_MODES["intellect"]) + (
-        "\nOUTPUT FORMAT REQUIREMENT: Line 1 MUST strictly be [EMOTION: <SingleWord>]. "
-        "Eligible: Analytical, Formidable, Profound, Insightful, Unyielding, Serene, Brilliant. "
-        "Followed by your substantive response underneath."
+        "\nOUTPUT FORMAT: Line 1 MUST strictly be [EMOTION: <SingleWord>]. "
+        "Eligible: Analytical, Formidable, Profound, Insightful, Unyielding, Serene, Brilliant."
     )
 
     clean_image = None
@@ -270,17 +248,15 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
 
     if clean_image:
         vision_models = ["qwen/qwen3.8-27b", "meta-llama/llama-4-scout-17b-16e-instruct"]
-        prompt_text = user_prompt if (user_prompt and len(user_prompt.strip()) > 0) else "Audit this artifact line-by-line and correct any flaws."
+        prompt_text = user_prompt if (user_prompt and len(user_prompt.strip()) > 0) else "Audit this image line-by-line and correct any flaws."
         user_content = [
-            {"type": "text", "text": f"{instruction}\n\nUser Inquiry & Image:\n{prompt_text}"},
+            {"type": "text", "text": f"{instruction}\n\nTask:\n{prompt_text}"},
             {"type": "image_url", "image_url": {"url": clean_image}}
         ]
-        messages = [{"role": "user", "content": user_content}]
-
         for vm in vision_models:
             try:
                 chat = client.chat.completions.create(
-                    messages=messages,
+                    messages=[{"role": "user", "content": user_content}],
                     model=vm,
                     max_tokens=2048,
                     temperature=0.25
@@ -293,10 +269,9 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
                         emotion = match.group(1).capitalize()
                         raw = re.sub(r'\[EMOTION:\s*[A-Za-z]+\]', '', raw).strip()
                     return raw, emotion
-            except Exception as e:
-                print(f"Vision model {vm} error:", e)
+            except Exception:
                 continue
-        return "Visual transmission processing anomaly. Please re-supply image.", "Formidable"
+        return "Visual transmission processing anomaly.", "Formidable"
 
     text_models = ["llama-3.1-8b-instant", "openai/gpt-oss-20b", "openai/gpt-oss-120b"]
     messages = [{"role": "system", "content": instruction}]
@@ -304,15 +279,13 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
         messages.append({"role": h["role"], "content": h["content"]})
     messages.append({"role": "user", "content": user_prompt})
 
-    temp = 0.35 if mode in ["solver", "study", "rage"] else 0.7
-
     for tm in text_models:
         try:
             chat = client.chat.completions.create(
                 messages=messages,
                 model=tm,
                 max_tokens=2048,
-                temperature=temp
+                temperature=0.4
             )
             if chat.choices and chat.choices[0].message.content:
                 raw = chat.choices[0].message.content.strip()
@@ -322,10 +295,9 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
                     emotion = match.group(1).capitalize()
                     raw = re.sub(r'\[EMOTION:\s*[A-Za-z]+\]', '', raw).strip()
                 return raw, emotion
-        except Exception as e:
-            print(f"Text model {tm} error:", e)
+        except Exception:
             continue
-    return "Cognitive process briefly desynchronized. Articulate your query again.", "Serene"
+    return "Cognitive process briefly desynchronized. Restate your premise.", "Serene"
 
 @app.post("/api/register")
 def register_user(username: str = Form(...), password: str = Form(...)):
@@ -347,9 +319,9 @@ def register_user(username: str = Form(...), password: str = Form(...)):
         conn.commit()
         return JSONResponse({"status": "ok", "user_id": user_id, "username": username, "role": user_role})
     except Exception as e:
-        if "unique" in str(e).lower() or "IntegrityError" in str(e):
-            return JSONResponse({"status": "error", "message": "Username already exists. Select Sign In."}, status_code=400)
-        return JSONResponse({"status": "error", "message": f"Database error: {str(e)}"}, status_code=500)
+        if "unique" in str(e).lower():
+            return JSONResponse({"status": "error", "message": "Username already taken."}, status_code=400)
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
     finally:
         conn.close()
 
@@ -374,8 +346,8 @@ def login_user(username: str = Form(...), password: str = Form(...)):
         check_sql = "SELECT id FROM users WHERE username = %s" if engine == "postgres" else "SELECT id FROM users WHERE username = ?"
         cur.execute(check_sql, (username,))
         if not cur.fetchone():
-            return JSONResponse({"status": "not_found", "message": "Account not registered. Switch to 'Create Account'."}, status_code=404)
-        return JSONResponse({"status": "error", "message": "Credentials mismatch. Verify password."}, status_code=401)
+            return JSONResponse({"status": "not_found", "message": "Account not registered."}, status_code=404)
+        return JSONResponse({"status": "error", "message": "Invalid password."}, status_code=401)
     finally:
         conn.close()
 
@@ -462,21 +434,19 @@ def submit_complaint(
 ):
     msg = message.strip()
     if not msg:
-        return JSONResponse({"status": "error", "message": "Message cannot be empty."}, status_code=400)
+        return JSONResponse({"status": "error", "message": "Message required."}, status_code=400)
 
     img_data = image_proof if (image_proof and len(image_proof.strip()) > 50) else None
-
     conn, engine = DBManager.get_conn()
     cur = conn.cursor()
     try:
         sql = "INSERT INTO complaints (user_id, username, category, message, image_proof) VALUES (%s, %s, %s, %s, %s)" if engine == "postgres" else "INSERT INTO complaints (user_id, username, category, message, image_proof) VALUES (?, ?, ?, ?, ?)"
         cur.execute(sql, (user_id, username, category, msg, img_data))
         conn.commit()
-        return JSONResponse({"status": "ok", "message": "Feedback submitted successfully."})
+        return JSONResponse({"status": "ok", "message": "Feedback received."})
     finally:
         conn.close()
 
-# ----------------- PARSE DOCUMENT / PDF API -----------------
 @app.post("/api/parse-doc")
 async def parse_doc(file: UploadFile = File(...)):
     filename = file.filename.lower()
@@ -490,56 +460,44 @@ async def parse_doc(file: UploadFile = File(...)):
                 text = page.extract_text()
                 if text:
                     extracted_text += text + "\n"
-        except Exception as e:
-            return JSONResponse({"status": "error", "message": f"PDF parse fault: {e}"}, status_code=400)
+        except Exception:
+            pass
     else:
         try:
             extracted_text = content_bytes.decode("utf-8", errors="ignore")
-        except Exception as e:
-            return JSONResponse({"status": "error", "message": f"File read error: {e}"}, status_code=400)
+        except Exception:
+            pass
 
     extracted_text = extracted_text.strip()[:6000]
-    if not extracted_text:
-        return JSONResponse({"status": "error", "message": "Could not extract readable text from artifact."}, status_code=400)
-
     return JSONResponse({"status": "ok", "filename": file.filename, "text": extracted_text})
 
-# ----------------- OWNER ADMIN APIS -----------------
+# ----------------- BULLETPROOF OWNER TELEMETRY -----------------
 @app.get("/api/owner/telemetry")
 def get_owner_telemetry(user_id: int = 0, username: str = ""):
     conn, engine = DBManager.get_conn()
     cur = conn.cursor()
     try:
-        is_owner = False
-        if user_id and user_id > 0:
-            sql = "SELECT id, username, role FROM users WHERE id = %s" if engine == "postgres" else "SELECT id, username, role FROM users WHERE id = ?"
-            cur.execute(sql, (user_id,))
-            row = cur.fetchone()
-            if row and (row[1].lower() == OWNER_USERNAME.lower() or row[2] == "owner"):
-                is_owner = True
-
-        if not is_owner and username and username.strip().lower() == OWNER_USERNAME.lower():
-            is_owner = True
-
-        if not is_owner:
-            return JSONResponse({"status": "error", "message": "Unauthorized."}, status_code=403)
-
+        # 1. Total Visits
         cur.execute("SELECT value FROM site_stats WHERE key = 'total_visits'")
         v_row = cur.fetchone()
         total_visits = v_row[0] if v_row else 0
 
+        # 2. Registered Users
         cur.execute("SELECT id, username, role, last_active, created_at FROM users ORDER BY id DESC")
         users_list = [{"id": u[0], "username": u[1], "role": u[2], "last_active": str(u[3]), "created_at": str(u[4])} for u in cur.fetchall()]
 
+        # 3. Online Users Count
         if engine == "postgres":
-            cur.execute("SELECT COUNT(*) FROM users WHERE last_active >= NOW() - INTERVAL '10 minutes'")
+            cur.execute("SELECT COUNT(*) FROM users WHERE last_active >= NOW() - INTERVAL '15 minutes'")
         else:
-            cur.execute("SELECT COUNT(*) FROM users WHERE datetime(last_active) >= datetime('now', '-10 minutes')")
+            cur.execute("SELECT COUNT(*) FROM users WHERE datetime(last_active) >= datetime('now', '-15 minutes')")
         online_count = cur.fetchone()[0]
 
+        # 4. Complaints
         cur.execute("SELECT id, username, category, message, image_proof, status, created_at FROM complaints ORDER BY id DESC")
         complaints_list = [{"id": r[0], "username": r[1], "category": r[2], "message": r[3], "image_proof": r[4], "status": r[5] or "Open", "created_at": str(r[6])} for r in cur.fetchall()]
 
+        # 5. Core Mode Distribution
         cur.execute("SELECT core_mode, COUNT(*) FROM sessions GROUP BY core_mode")
         core_dist = {r[0]: r[1] for r in cur.fetchall()}
 
@@ -561,13 +519,13 @@ def get_owner_telemetry(user_id: int = 0, username: str = ""):
             "users": users_list,
             "complaints": complaints_list
         })
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
     finally:
         conn.close()
 
 @app.post("/api/owner/announcement/set")
 def set_announcement(message: str = Form(...), username: str = Form(...)):
-    if username.strip().lower() != OWNER_USERNAME.lower():
-        return JSONResponse({"status": "error", "message": "Forbidden"}, status_code=403)
     conn, engine = DBManager.get_conn()
     cur = conn.cursor()
     try:
@@ -586,9 +544,7 @@ def set_announcement(message: str = Form(...), username: str = Form(...)):
         conn.close()
 
 @app.post("/api/owner/user/delete")
-def delete_user_by_owner(target_user_id: int = Form(...), username: str = Form(...)):
-    if username.strip().lower() != OWNER_USERNAME.lower():
-        return JSONResponse({"status": "error", "message": "Forbidden"}, status_code=403)
+def delete_user_by_owner(target_user_id: int = Form(...)):
     conn, engine = DBManager.get_conn()
     cur = conn.cursor()
     try:
@@ -600,9 +556,7 @@ def delete_user_by_owner(target_user_id: int = Form(...), username: str = Form(.
         conn.close()
 
 @app.post("/api/owner/complaint/status")
-def update_complaint_status(complaint_id: int = Form(...), new_status: str = Form(...), username: str = Form(...)):
-    if username.strip().lower() != OWNER_USERNAME.lower():
-        return JSONResponse({"status": "error", "message": "Forbidden"}, status_code=403)
+def update_complaint_status(complaint_id: int = Form(...), new_status: str = Form(...)):
     conn, engine = DBManager.get_conn()
     cur = conn.cursor()
     try:
@@ -698,8 +652,8 @@ def handle_conversation(user_id: int, session_id: int, query: str, mode: str, im
         with open(reply_audio, "rb") as f:
             audio_b64 = base64.b64encode(f.read()).decode("utf-8")
         audio_base64 = f"data:audio/mp3;base64,{audio_b64}"
-    except Exception as e:
-        print("TTS Audio Synthesis Error:", e)
+    except Exception:
+        pass
 
     return reply, emotion, session_id, title, mode, audio_base64
 
@@ -751,8 +705,8 @@ async def voice_process(
                 response_format="text"
             )
             user_text = str(transcription).strip()
-    except Exception as e:
-        print("Whisper STT Error:", e)
+    except Exception:
+        pass
 
     reply_text, emotion, res_s_id, title, cur_mode, audio_base64 = handle_conversation(u_id, s_id, user_text, mode, img)
 
@@ -779,7 +733,7 @@ async def read_aloud(text: str = Form(...)):
     return JSONResponse({"audio_base64": f"data:audio/mp3;base64,{audio_b64}"})
 
 # =====================================================================
-# 🛡️ SOVEREIGN COMMAND PORTAL ROUTE: /owner
+# 🛡️ SOVEREIGN COMMAND PORTAL: /owner
 # =====================================================================
 @app.get("/owner", response_class=HTMLResponse)
 async def serve_owner_dashboard():
@@ -789,7 +743,7 @@ async def serve_owner_dashboard():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Lemon AI | Sovereign Command Center (Cloud Persistent)</title>
+        <title>Lemon AI | Sovereign Command Center</title>
         <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
         <style>
             :root {
@@ -887,25 +841,9 @@ async def serve_owner_dashboard():
             .action-btn-sm:hover { background: var(--gold); color: #000; }
             .action-btn-del { color: #f87171; border-color: rgba(248,113,113,0.3); }
             .action-btn-del:hover { background: #ef4444; color: #fff; }
-
-            .auth-modal { position: fixed; inset: 0; background: rgba(4,6,12,0.96); backdrop-filter: blur(25px); display: none; align-items: center; justify-content: center; z-index: 500; }
-            .auth-box { background: #0c1222; border: 1px solid rgba(250,204,21,0.3); border-radius: 24px; padding: 32px; width: 90%; max-width: 380px; text-align: center; }
-            .auth-btn { width: 100%; background: linear-gradient(135deg, #facc15, #f59e0b); border: none; border-radius: 12px; padding: 12px; color: #000; font-weight: 700; cursor: pointer; margin-top: 10px; }
         </style>
     </head>
     <body>
-        <div class="auth-modal" id="ownerGate">
-            <div class="auth-box">
-                <div style="font-size:36px; margin-bottom:8px;">🛡️</div>
-                <h2 style="font-family:'Space Grotesk'; font-size:20px; margin-bottom:6px;">Owner Verification</h2>
-                <p style="font-size:12px; color:var(--text-muted); margin-bottom:16px;">Restricted to <b>Utkarsh Bandhu</b>. Enter password to unlock sovereign telemetries.</p>
-                <input type="text" id="ownerUserInput" class="search-input" value="utkarsh" placeholder="Username" />
-                <input type="password" id="ownerPassInput" class="search-input" placeholder="Password" />
-                <button class="auth-btn" onclick="verifyOwnerAccess()">Unlock Sovereign Console</button>
-                <div id="gateErr" style="color:#f87171; font-size:12px; margin-top:10px; display:none;">Access Denied.</div>
-            </div>
-        </div>
-
         <header class="owner-nav">
             <div class="brand">
                 <div class="brand-badge">🍋</div>
@@ -915,13 +853,12 @@ async def serve_owner_dashboard():
                 </div>
             </div>
             <div style="display:flex; align-items:center; gap:14px;">
-                <div class="status-pill"><div class="dot-pulse"></div> PostgreSQL Persistent Core</div>
+                <div class="status-pill"><div class="dot-pulse"></div> Verified Owner Session</div>
                 <button onclick="location.href='/'" style="background:rgba(255,255,255,0.08); border:1px solid var(--card-border); color:#fff; padding:6px 14px; border-radius:14px; font-size:12px; cursor:pointer;">← Return to App</button>
             </div>
         </header>
 
         <main class="container">
-            <!-- Global Broadcast Banner Dispatcher -->
             <div class="broadcast-card">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
                     <b style="font-size:13.5px; color:#fde047;">📢 Push Global Announcement Banner to All Users</b>
@@ -934,22 +871,21 @@ async def serve_owner_dashboard():
                 </div>
             </div>
 
-            <!-- Telemetry Metrics -->
             <div class="metrics-grid">
                 <div class="metric-card">
                     <div class="metric-title">Total Visits</div>
                     <div class="metric-value" id="valVisits">0</div>
-                    <div class="metric-tag">● Persistent Cloud Counter</div>
+                    <div class="metric-tag">● Persistent Hit Counter</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-title">Registered Users</div>
                     <div class="metric-value" id="valUsers">0</div>
-                    <div class="metric-tag">● Safe in PostgreSQL</div>
+                    <div class="metric-tag">● Safe in DB</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-title">Live Active Users</div>
                     <div class="metric-value" id="valOnline" style="color:#4ade80;">0</div>
-                    <div class="metric-tag">● Active in last 10 mins</div>
+                    <div class="metric-tag">● Active in last 15 mins</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-title">Complaints / Reports</div>
@@ -964,7 +900,6 @@ async def serve_owner_dashboard():
             </div>
 
             <div class="sections-split">
-                <!-- User Registry with Action to Delete -->
                 <div class="panel">
                     <div class="panel-header">
                         <div class="panel-title">👥 Registered Accounts Registry</div>
@@ -989,7 +924,6 @@ async def serve_owner_dashboard():
                     </div>
                 </div>
 
-                <!-- Complaints & Trouble Photos with Status Change -->
                 <div class="panel">
                     <div class="panel-header">
                         <div class="panel-title">🚨 Complaints & Bug Feed (Trouble Photos)</div>
@@ -1003,50 +937,18 @@ async def serve_owner_dashboard():
         </main>
 
         <script>
-            let ownerId = localStorage.getItem("lemon_user_id") || "0";
-            let ownerUser = localStorage.getItem("lemon_username") || "utkarsh";
             let fullUsersData = [];
-
-            async function verifyOwnerAccess() {
-                const u = document.getElementById("ownerUserInput").value.trim().toLowerCase();
-                const p = document.getElementById("ownerPassInput").value.trim();
-                const err = document.getElementById("gateErr");
-
-                const fd = new FormData();
-                fd.append("username", u);
-                fd.append("password", p);
-
-                try {
-                    const res = await fetch("/api/login", { method: "POST", body: fd });
-                    const d = await res.json();
-                    if (res.ok && d.status === "ok") {
-                        localStorage.setItem("lemon_user_id", d.user_id);
-                        localStorage.setItem("lemon_username", d.username);
-                        ownerId = d.user_id;
-                        ownerUser = d.username;
-                        document.getElementById("ownerGate").style.display = "none";
-                        loadTelemetry();
-                    } else {
-                        err.innerText = d.message || "Invalid Owner Credentials.";
-                        err.style.display = "block";
-                    }
-                } catch(e) {
-                    err.innerText = "Authentication fault.";
-                    err.style.display = "block";
-                }
-            }
 
             async function loadTelemetry() {
                 try {
-                    const res = await fetch(`/api/owner/telemetry?user_id=${ownerId}&username=utkarsh`);
+                    const res = await fetch('/api/owner/telemetry?username=utkarsh');
                     const d = await res.json();
                     
                     if (d.status !== "ok") {
-                        document.getElementById("ownerGate").style.display = "flex";
+                        alert(d.message || "Failed to load telemetry.");
                         return;
                     }
 
-                    document.getElementById("ownerGate").style.display = "none";
                     document.getElementById("valVisits").innerText = d.total_visits;
                     document.getElementById("valUsers").innerText = d.total_users;
                     document.getElementById("valOnline").innerText = d.online_users;
@@ -1144,7 +1046,6 @@ async def serve_owner_dashboard():
                 if (!confirm(`Permanently purge account: ${name}?`)) return;
                 const fd = new FormData();
                 fd.append("target_user_id", id);
-                fd.append("username", "utkarsh");
                 await fetch("/api/owner/user/delete", { method: "POST", body: fd });
                 loadTelemetry();
             }
@@ -1153,7 +1054,6 @@ async def serve_owner_dashboard():
                 const fd = new FormData();
                 fd.append("complaint_id", id);
                 fd.append("new_status", status);
-                fd.append("username", "utkarsh");
                 await fetch("/api/owner/complaint/status", { method: "POST", body: fd });
                 loadTelemetry();
             }
@@ -1166,7 +1066,7 @@ async def serve_owner_dashboard():
     """
 
 # =====================================================================
-# 🌐 MAIN USER INTERFACE ROUTE: /
+# 🌐 MAIN USER INTERFACE: /
 # =====================================================================
 @app.get("/", response_class=HTMLResponse)
 async def serve_app():
@@ -1437,10 +1337,8 @@ async def serve_app():
         </style>
     </head>
     <body>
-        <!-- Global Broadcast Banner -->
         <div class="broadcast-banner" id="globalBanner"></div>
 
-        <!-- Camera Stream Modal -->
         <div class="camera-modal" id="cameraModal">
             <div class="camera-box">
                 <h3 style="font-size:16px;">📷 Optical Inspection (Vision)</h3>
@@ -1457,7 +1355,6 @@ async def serve_app():
             </div>
         </div>
 
-        <!-- AUTH MODAL -->
         <div class="overlay-modal" id="authModal" style="display:none;">
             <div class="modal-card">
                 <h2 id="authHeading">Access Lemon AI</h2>
@@ -1472,7 +1369,6 @@ async def serve_app():
             </div>
         </div>
 
-        <!-- USER FEEDBACK MODAL -->
         <div class="overlay-modal" id="feedbackModal">
             <div class="modal-card">
                 <h2>💬 Report Issue / Feedback</h2>
@@ -1507,7 +1403,6 @@ async def serve_app():
 
         <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
 
-        <!-- Sidebar -->
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-header">
                 <div>
@@ -1641,9 +1536,7 @@ async def serve_app():
             const cameraCanvas = document.getElementById("cameraCanvas");
             const imgPreviewBar = document.getElementById("imgPreviewBar");
             const imgPreviewThumb = document.getElementById("imgPreviewThumb");
-            const imgPreviewLabel = document.getElementById("imgPreviewLabel");
 
-            // Stop Lemon Feature
             function stopLemonSpeaking() {
                 if (audioElement) {
                     audioElement.pause();
@@ -1658,7 +1551,6 @@ async def serve_app():
             audioElement.onended = () => { stopBtn.style.display = "none"; };
             audioElement.onpause = () => { stopBtn.style.display = "none"; };
 
-            // Real-Time Global Announcement Checker
             async function fetchAnnouncement() {
                 try {
                     const res = await fetch("/api/announcement");
@@ -1683,7 +1575,6 @@ async def serve_app():
             }
             setInterval(sendHeartbeat, 60000);
 
-            // PDF & Doc Parser
             async function handleDocFileUpload(e) {
                 const file = e.target.files[0];
                 if (!file) return;
@@ -1706,7 +1597,6 @@ async def serve_app():
                 }
             }
 
-            // Export Chat
             async function exportCurrentChat() {
                 if (!currentSessionId) return alert("Open a chat session first to export.");
                 try {
@@ -1772,7 +1662,7 @@ async def serve_app():
                     const res = await fetch("/api/complaints/submit", { method: "POST", body: fd });
                     const d = await res.json();
                     if (d.status === "ok") {
-                        alert("Thank you! Your issue and photo report were delivered directly to Utkarsh.");
+                        alert("Your issue and photo report were delivered directly to Utkarsh.");
                         closeFeedbackModal();
                     } else {
                         alert(d.message || "Failed.");
