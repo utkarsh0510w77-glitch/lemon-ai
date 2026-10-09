@@ -1,7 +1,7 @@
-gradio
-groq
-gtts
 fastapi
 uvicorn
+groq
+gtts
 python-multipart
 psycopg2-binary
+pypdf
