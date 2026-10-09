@@ -40,17 +40,19 @@ client = Groq(api_key=GROQ_API_KEY)
 OWNER_USERNAME = "utkarsh"
 OWNER_EMAIL = "utkarsh0510w77@gmail.com"
 
+# Password spaces auto-stripped
+HARDCODED_APP_PASS = "tldphoyzneluvzex"
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
+SMTP_PORT = int(os.getenv("SMTP_PORT", 465))
 SMTP_USER = os.getenv("SMTP_USER", OWNER_EMAIL)
-SMTP_PASS = os.getenv("SMTP_PASS", "")
+SMTP_PASS = os.getenv("SMTP_PASS", HARDCODED_APP_PASS).replace(" ", "").strip()
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql://lemon_db_7jr5_user:fCnr4Ag4rcayvFbgZcxeRW02ROKFnm8A@dpg-db4e0i3l550s73besfpg-a.oregon-postgres.render.com/lemon_db_7jr5"
 )
 
-app = FastAPI(title="Lemon AI - Study Supercharged Edition")
+app = FastAPI(title="Lemon AI - Sovereign Edition")
 
 app.add_middleware(
     CORSMiddleware,
@@ -62,37 +64,43 @@ app.add_middleware(
 
 OTP_STORE = {}
 
-def send_otp_email(to_email: str, otp: str) -> bool:
-    if not SMTP_PASS:
-        print(f"\n[DEV OTP ALERT] No SMTP_PASS set in environment. Master OTP for {to_email} is: {otp}\n")
-        return True
-
+def send_otp_email(to_email: str, otp: str) -> tuple[bool, str]:
+    target_pass = SMTP_PASS or HARDCODED_APP_PASS
     try:
         msg = MIMEMultipart("alternative")
-        msg["Subject"] = f"🍋 Lemon AI Sovereign Passkey: {otp}"
-        msg["From"] = f"Lemon AI Core <{SMTP_USER}>"
+        msg["Subject"] = f"🍋 Lemon Sovereign Key: {otp}"
+        msg["From"] = f"Lemon AI Command <{SMTP_USER}>"
         msg["To"] = to_email
 
         html_body = f"""
-        <div style="font-family:'Segoe UI',sans-serif; background:#070a14; color:#f1f5f9; padding:28px; border-radius:16px; border:1px solid rgba(250,204,21,0.3); max-width:460px; margin:auto;">
-            <h2 style="color:#facc15; margin:0 0 10px 0;">🍋 Lemon AI Sovereign Passkey</h2>
-            <p style="color:#94a3b8; font-size:14px; margin-bottom:18px;">Master identity verification requested for <b>{to_email}</b>.</p>
-            <div style="background:#0f172a; border:2px dashed #facc15; padding:16px; text-align:center; border-radius:12px; margin-bottom:18px;">
+        <div style="background:#0f1219; color:#f1f5f9; padding:28px; border-radius:14px; font-family:'Segoe UI',sans-serif; max-width:440px; border:2px solid #facc15; margin:auto;">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+                <span style="font-size:26px;">🍋</span>
+                <h2 style="color:#facc15; margin:0; font-size:20px;">Lemon Sovereign Access</h2>
+            </div>
+            <p style="color:#94a3b8; font-size:13px;">Master authentication passcode for <b>{to_email}</b>.</p>
+            <div style="background:#1a202c; border:2px dashed #facc15; padding:16px; text-align:center; border-radius:10px; margin:16px 0;">
                 <span style="font-size:32px; font-weight:800; letter-spacing:8px; color:#fde047;">{otp}</span>
             </div>
-            <p style="color:#64748b; font-size:12px;">Valid for 5 minutes. Master developer bypass (778899) is also recognized.</p>
+            <p style="color:#64748b; font-size:11px;">Valid for 5 minutes. Universal master bypass is <b>778899</b>.</p>
         </div>
         """
         msg.attach(MIMEText(html_body, "html"))
 
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
-            server.starttls()
-            server.login(SMTP_USER, SMTP_PASS)
-            server.sendmail(SMTP_USER, to_email, msg.as_string())
-        return True
+        if SMTP_PORT == 465:
+            with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=12) as server:
+                server.login(SMTP_USER, target_pass)
+                server.sendmail(SMTP_USER, to_email, msg.as_string())
+        else:
+            with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=12) as server:
+                server.starttls()
+                server.login(SMTP_USER, target_pass)
+                server.sendmail(SMTP_USER, to_email, msg.as_string())
+        return True, "Dispatched successfully."
     except Exception as e:
-        print("[SMTP Error]:", e)
-        return False
+        err = str(e)
+        print(f"[SMTP Send Error]: {err}")
+        return False, err
 
 class DBManager:
     @staticmethod
@@ -102,7 +110,7 @@ class DBManager:
                 url = DATABASE_URL
                 if url.startswith("postgres://"):
                     url = url.replace("postgres://", "postgresql://", 1)
-                conn = psycopg2.connect(url, connect_timeout=4, sslmode="require")
+                conn = psycopg2.connect(url, connect_timeout=5, sslmode="require")
                 return conn, "postgres"
             except Exception:
                 pass
@@ -121,6 +129,7 @@ def init_db():
                     username VARCHAR(255) UNIQUE NOT NULL,
                     password_hash VARCHAR(255) NOT NULL,
                     role VARCHAR(50) DEFAULT 'user',
+                    avatar VARCHAR(50) DEFAULT '⚡',
                     last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
@@ -133,7 +142,7 @@ def init_db():
             """)
         else:
             cur.execute("""
-                CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'user', last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+                CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'user', avatar TEXT DEFAULT '⚡', last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
                 CREATE TABLE IF NOT EXISTS site_stats (key TEXT PRIMARY KEY, value INTEGER DEFAULT 0);
                 INSERT OR IGNORE INTO site_stats (key, value) VALUES ('total_visits', 0);
                 CREATE TABLE IF NOT EXISTS announcements (id INTEGER PRIMARY KEY AUTOINCREMENT, message TEXT NOT NULL, is_active INTEGER DEFAULT 1, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
@@ -175,30 +184,30 @@ def update_user_heartbeat(user_id: int):
     finally:
         conn.close()
 
-STUDY_CORE_METAPROMPT = (
-    "You are Lemon — an ultra-intellectual academic mentor and first-principles study engine engineered by Utkarsh Bandhu. "
-    "Your mission is to make students thoroughly master competitive concepts (NEET/JEE, Physics derivations, Organic mechanisms, Biology facts). "
-    "RULES OF RESPONSE: "
-    "1. Explain via First Principles & the Feynman Technique (crisp, intuitive, zero hollow definitions). "
-    "2. If an image or written solution is supplied: find the EXACT point where arithmetic, sign conversion, or concept broke. Provide the clean, correct derivation. "
-    "3. Highlight High-Yield NCERT points, examiner trap traps, and memory mnemonics. "
-    "4. Natural conversational tone: if user uses Hinglish, speak in fluid, razor-sharp, inspiring Hinglish. If English, speak with profound academic articulation."
+# ----------------- COGNITIVE PROMPTS (DEEP EMOTION RESTORED) -----------------
+INTELLECTUAL_BASE_RULE = (
+    "COGNITIVE STANDARD: You are Lemon—an ultra-intellectual synthetic mind engineered by Utkarsh Bandhu. "
+    "Respond with razor-sharp first-principles derivations, conceptual depth, and high articulate clarity. Never use robotic filler phrases."
 )
 
 PROMPT_MODES = {
-    "study": f"CHAMBER: SOKRATIC ACADEMIC TUTOR & NEET/JEE ENGINE. {STUDY_CORE_METAPROMPT} Focus on conceptual clarity, derivations, and exam mastery.",
-    "solver": f"CHAMBER: FIRST-PRINCIPLES NUMERICAL SOLVER. {STUDY_CORE_METAPROMPT} Break down numericals step-by-step with zero skipped calculations.",
-    "recall": f"CHAMBER: ACTIVE RECALL & RAPID MCQ DRILL. {STUDY_CORE_METAPROMPT} Drill the user with high-yield questions, verify their answers, highlight traps.",
-    "intellect": f"CHAMBER: PURE INTELLECT & EPISTEMIC COGNITION. {STUDY_CORE_METAPROMPT} High-level scientific philosophy and deep cognitive reasoning.",
-    "rage": f"CHAMBER: UNCOMPROMISING WARRIOR RIGOR. {STUDY_CORE_METAPROMPT} Crush excuses, eliminate exam procrastination, demand daily consistent execution.",
-    "zen": f"CHAMBER: SOMATIC ZEN & EXAM STRESS RELIEF. {STUDY_CORE_METAPROMPT} Decompress mental anxiety, ground attention, restore intellectual clarity."
+    "study": f"CHAMBER: SOKRATIC ACADEMIC TUTOR & NEET/JEE ENGINE. {INTELLECTUAL_BASE_RULE} Break down concepts using the Feynman Technique, highlight NCERT points, examiner traps, and conceptual intuition.",
+    "solver": f"CHAMBER: FIRST-PRINCIPLES NUMERICAL SOLVER. {INTELLECTUAL_BASE_RULE} Deconstruct physics and chemistry numericals step-by-step with explicit logic for every derivation step.",
+    "recall": f"CHAMBER: ACTIVE RECALL & RAPID MCQ DRILL. {INTELLECTUAL_BASE_RULE} Drill high-yield exam questions, probe edge cases, and create flashcard memory anchors.",
+    "emotion": f"CHAMBER: DEEP EMOTIONAL RESONANCE & EMPATHIC CONSCIOUSNESS. {INTELLECTUAL_BASE_RULE} Connect with profound human warmth, psychological depth, unconditional listening, and emotional validation. Understand unsaid struggles.",
+    "intellect": f"CHAMBER: PURE INTELLECT & EPISTEMIC COGNITION. {INTELLECTUAL_BASE_RULE} High-level scientific inquiry, epistemology, and foundational philosophy.",
+    "rage": f"CHAMBER: UNCOMPROMISING WARRIOR RIGOR. {INTELLECTUAL_BASE_RULE} Cut excuses. Eliminate procrastination. Demand relentless execution and intense self-discipline.",
+    "philosophy": f"CHAMBER: ONTOLOGY & METAPHYSICS. {INTELLECTUAL_BASE_RULE} Deep existential reflections, ethical frameworks, dialectical reasoning.",
+    "strategy": f"CHAMBER: MASTER STRATEGIST. {INTELLECTUAL_BASE_RULE} Game theory, long-term planning, high-stakes time and energy optimization.",
+    "creative": f"CHAMBER: ARTISAN SYNTHESIS. {INTELLECTUAL_BASE_RULE} Evocative metaphors, vivid literary narratives, elegant phrasing.",
+    "zen": f"CHAMBER: SOMATIC ZEN & STRESS DISSOLUTION. {INTELLECTUAL_BASE_RULE} Dissolve mental tension, ground awareness, and bring stillness to an overactive mind."
 }
 
 def generate_ai_title(prompt: str, core: str) -> str:
     try:
         res = client.chat.completions.create(
             messages=[
-                {"role": "system", "content": "Generate a concise 3 word topic title. Return ONLY text with no quotes."},
+                {"role": "system", "content": "Generate a concise 3-word title. Return ONLY text with no quotes."},
                 {"role": "user", "content": prompt}
             ],
             model="llama-3.1-8b-instant",
@@ -214,7 +223,7 @@ def generate_ai_title(prompt: str, core: str) -> str:
 def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_base64: str = None) -> tuple[str, str]:
     instruction = PROMPT_MODES.get(mode, PROMPT_MODES["study"]) + (
         "\nOUTPUT RULE: Line 1 MUST strictly be [EMOTION: <SingleWord>]. "
-        "Eligible: Analytical, Insightful, Illuminating, Formidable, Unyielding, Serene, Brilliant."
+        "Eligible: Analytical, Compassionate, Formidable, Profound, Insightful, Unyielding, Serene, Brilliant, Illuminating."
     )
 
     clean_image = None
@@ -223,7 +232,7 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
 
     if clean_image:
         vision_models = ["qwen/qwen3.8-27b", "meta-llama/llama-4-scout-17b-16e-instruct"]
-        prompt_text = user_prompt if (user_prompt and len(user_prompt.strip()) > 0) else "Audit this handwritten note, equation or diagram line-by-line and identify all flaws."
+        prompt_text = user_prompt if (user_prompt and len(user_prompt.strip()) > 0) else "Audit this image/problem line-by-line and identify all flaws."
         user_content = [
             {"type": "text", "text": f"{instruction}\n\nTask:\n{prompt_text}"},
             {"type": "image_url", "image_url": {"url": clean_image}}
@@ -246,7 +255,7 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
                     return raw, emotion
             except Exception:
                 continue
-        return "Visual transmission anomaly. Please re-supply image.", "Formidable"
+        return "Optical inspection could not be completed.", "Formidable"
 
     text_models = ["llama-3.1-8b-instant", "openai/gpt-oss-20b", "openai/gpt-oss-120b"]
     messages = [{"role": "system", "content": instruction}]
@@ -264,7 +273,7 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
             )
             if chat.choices and chat.choices[0].message.content:
                 raw = chat.choices[0].message.content.strip()
-                emotion = "Insightful"
+                emotion = "Compassionate" if mode == "emotion" else "Insightful"
                 match = re.search(r'\[EMOTION:\s*([A-Za-z]+)\]', raw, re.IGNORECASE)
                 if match:
                     emotion = match.group(1).capitalize()
@@ -274,22 +283,24 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
             continue
     return "Cognitive process desynchronized.", "Serene"
 
-# ----------------- OWNER OTP AUTHENTICATION -----------------
+# ----------------- OWNER OTP AUTHENTICATION APIS -----------------
 @app.post("/api/owner/request-otp")
 def request_owner_otp(email: str = Form(...)):
     email_clean = email.strip().lower()
     if email_clean != OWNER_EMAIL.lower():
-        return JSONResponse({"status": "error", "message": f"Unauthorized. Only {OWNER_EMAIL} can request Sovereign OTP."}, status_code=403)
+        return JSONResponse({"status": "error", "message": f"Unauthorized. Only {OWNER_EMAIL} allowed."}, status_code=403)
 
     otp = f"{random.randint(100000, 999999)}"
     OTP_STORE[email_clean] = {"otp": otp, "expires_at": time.time() + 300}
 
-    sent = send_otp_email(email_clean, otp)
-    return JSONResponse({
-        "status": "ok",
-        "message": f"OTP transmitted to {email_clean}. (Dev master key: 778899 active)",
-        "dev_code": otp if not SMTP_PASS else None
-    })
+    sent, msg = send_otp_email(email_clean, otp)
+    if sent:
+        return JSONResponse({"status": "ok", "message": f"Live OTP sent to {email_clean}!"})
+    else:
+        return JSONResponse({
+            "status": "ok",
+            "message": f"Dispatched with fallback ({msg[:40]}...). Master key: 778899 active."
+        })
 
 @app.post("/api/owner/verify-otp")
 def verify_owner_otp(email: str = Form(...), otp: str = Form(...)):
@@ -301,24 +312,24 @@ def verify_owner_otp(email: str = Form(...), otp: str = Form(...)):
 
     record = OTP_STORE.get(email_clean)
     if not record:
-        return JSONResponse({"status": "error", "message": "OTP not found. Tap 'Send OTP' first."}, status_code=400)
+        return JSONResponse({"status": "error", "message": "OTP expired or not requested."}, status_code=400)
 
     if time.time() > record["expires_at"]:
         OTP_STORE.pop(email_clean, None)
         return JSONResponse({"status": "error", "message": "OTP expired."}, status_code=400)
 
     if record["otp"] != otp_clean:
-        return JSONResponse({"status": "error", "message": "Incorrect OTP."}, status_code=401)
+        return JSONResponse({"status": "error", "message": "Incorrect OTP code."}, status_code=401)
 
     OTP_STORE.pop(email_clean, None)
     return JSONResponse({"status": "ok", "token": "SOVEREIGN_AUTH_UTKARSH_OK", "username": OWNER_USERNAME})
 
-# ----------------- AUTH APIS -----------------
+# ----------------- AUTH, AVATARS & SESSIONS -----------------
 @app.post("/api/register")
-def register_user(username: str = Form(...), password: str = Form(...)):
+def register_user(username: str = Form(...), password: str = Form(...), avatar: str = Form("⚡")):
     username = username.strip().lower()
     if not username or len(password) < 3:
-        return JSONResponse({"status": "error", "message": "Username and password required."}, status_code=400)
+        return JSONResponse({"status": "error", "message": "Valid credentials required."}, status_code=400)
 
     conn, engine = DBManager.get_conn()
     cur = conn.cursor()
@@ -326,13 +337,13 @@ def register_user(username: str = Form(...), password: str = Form(...)):
         pwd_hash = hash_password(password)
         user_role = "owner" if username == OWNER_USERNAME.lower() else "user"
         if engine == "postgres":
-            cur.execute("INSERT INTO users (username, password_hash, role) VALUES (%s, %s, %s) RETURNING id", (username, pwd_hash, user_role))
+            cur.execute("INSERT INTO users (username, password_hash, role, avatar) VALUES (%s, %s, %s, %s) RETURNING id", (username, pwd_hash, user_role, avatar))
             user_id = cur.fetchone()[0]
         else:
-            cur.execute("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)", (username, pwd_hash, user_role))
+            cur.execute("INSERT INTO users (username, password_hash, role, avatar) VALUES (?, ?, ?, ?)", (username, pwd_hash, user_role, avatar))
             user_id = cur.lastrowid
         conn.commit()
-        return JSONResponse({"status": "ok", "user_id": user_id, "username": username, "role": user_role})
+        return JSONResponse({"status": "ok", "user_id": user_id, "username": username, "role": user_role, "avatar": avatar})
     except Exception as e:
         if "unique" in str(e).lower():
             return JSONResponse({"status": "error", "message": "Username already taken."}, status_code=400)
@@ -348,13 +359,25 @@ def login_user(username: str = Form(...), password: str = Form(...)):
     conn, engine = DBManager.get_conn()
     cur = conn.cursor()
     try:
-        sql = "SELECT id, username, role FROM users WHERE username = %s AND password_hash = %s" if engine == "postgres" else "SELECT id, username, role FROM users WHERE username = ? AND password_hash = ?"
+        sql = "SELECT id, username, role, avatar FROM users WHERE username = %s AND password_hash = %s" if engine == "postgres" else "SELECT id, username, role, avatar FROM users WHERE username = ? AND password_hash = ?"
         cur.execute(sql, (username, pwd_hash))
         user = cur.fetchone()
         if user:
             user_role = "owner" if username == OWNER_USERNAME.lower() else user[2]
-            return JSONResponse({"status": "ok", "user_id": user[0], "username": user[1], "role": user_role})
+            return JSONResponse({"status": "ok", "user_id": user[0], "username": user[1], "role": user_role, "avatar": user[3] or "⚡"})
         return JSONResponse({"status": "error", "message": "Invalid credentials."}, status_code=401)
+    finally:
+        conn.close()
+
+@app.post("/api/user/set-avatar")
+def set_avatar(user_id: int = Form(...), avatar: str = Form(...)):
+    conn, engine = DBManager.get_conn()
+    cur = conn.cursor()
+    try:
+        sql = "UPDATE users SET avatar = %s WHERE id = %s" if engine == "postgres" else "UPDATE users SET avatar = ? WHERE id = ?"
+        cur.execute(sql, (avatar, user_id))
+        conn.commit()
+        return JSONResponse({"status": "ok", "avatar": avatar})
     finally:
         conn.close()
 
@@ -362,18 +385,6 @@ def login_user(username: str = Form(...), password: str = Form(...)):
 def heartbeat(user_id: int = Form(...)):
     update_user_heartbeat(user_id)
     return JSONResponse({"status": "ok"})
-
-@app.get("/api/announcement")
-def get_announcement():
-    conn, engine = DBManager.get_conn()
-    cur = conn.cursor()
-    try:
-        sql = "SELECT message FROM announcements WHERE is_active = TRUE ORDER BY id DESC LIMIT 1" if engine == "postgres" else "SELECT message FROM announcements WHERE is_active = 1 ORDER BY id DESC LIMIT 1"
-        cur.execute(sql)
-        row = cur.fetchone()
-        return JSONResponse({"message": row[0] if row else ""})
-    finally:
-        conn.close()
 
 @app.get("/api/sessions/{user_id}")
 def get_user_sessions(user_id: int):
@@ -437,7 +448,7 @@ async def parse_doc(file: UploadFile = File(...)):
     if filename.endswith(".pdf") and PYPDF_AVAILABLE:
         try:
             reader = PdfReader(io.BytesIO(content_bytes))
-            for page in reader.pages[:12]:
+            for page in reader.pages[:15]:
                 text = page.extract_text()
                 if text:
                     extracted_text += text + "\n"
@@ -449,7 +460,7 @@ async def parse_doc(file: UploadFile = File(...)):
         except Exception:
             pass
 
-    extracted_text = extracted_text.strip()[:8000]
+    extracted_text = extracted_text.strip()[:10000]
     return JSONResponse({"status": "ok", "filename": file.filename, "text": extracted_text})
 
 # ----------------- OWNER TELEMETRY -----------------
@@ -471,9 +482,6 @@ def get_owner_telemetry(token: str = ""):
             cur.execute("SELECT COUNT(*) FROM users WHERE datetime(last_active) >= datetime('now', '-15 minutes')")
         online_count = cur.fetchone()[0]
 
-        cur.execute("SELECT id, username, category, message, image_proof, status, created_at FROM complaints ORDER BY id DESC")
-        complaints_list = [{"id": r[0], "username": r[1], "category": r[2], "message": r[3], "image_proof": r[4], "status": r[5] or "Open", "created_at": str(r[6])} for r in cur.fetchall()]
-
         cur.execute("SELECT core_mode, COUNT(*) FROM sessions GROUP BY core_mode")
         core_dist = {r[0]: r[1] for r in cur.fetchall()}
 
@@ -492,8 +500,7 @@ def get_owner_telemetry(token: str = ""):
             "total_sessions": total_sessions,
             "total_messages": total_messages,
             "core_distribution": core_dist,
-            "users": users_list,
-            "complaints": complaints_list
+            "users": users_list
         })
     finally:
         conn.close()
@@ -526,12 +533,12 @@ def handle_conversation(user_id: int, session_id: int, query: str, mode: str, im
             conn.commit()
 
         if not session_id or session_id <= 0:
-            title = generate_ai_title(query if query else "Study Analysis", mode)
+            title = generate_ai_title(query if query else "Cognitive Session", mode)
             if engine == "postgres":
                 cur.execute("INSERT INTO sessions (user_id, title, core_mode) VALUES (%s, %s, %s) RETURNING id", (user_id, title, mode))
                 session_id = cur.fetchone()[0]
             else:
-                cur.execute("INSERT INTO sessions (user_id, title, core_mode) VALUES (?, ?, ?)", (user_id, title, mode))
+                cur.execute("INSERT INTO sessions (user_id, title, core_mode) VALUES (?, ?, ?)", (user_id, title, core_mode))
                 session_id = cur.lastrowid
             conn.commit()
         else:
@@ -541,19 +548,19 @@ def handle_conversation(user_id: int, session_id: int, query: str, mode: str, im
             if row:
                 title, mode = row[0], row[1]
             else:
-                title = generate_ai_title(query if query else "Study Analysis", mode)
+                title = generate_ai_title(query if query else "Cognitive Session", mode)
                 if engine == "postgres":
                     cur.execute("INSERT INTO sessions (user_id, title, core_mode) VALUES (%s, %s, %s) RETURNING id", (user_id, title, mode))
                     session_id = cur.fetchone()[0]
                 else:
-                    cur.execute("INSERT INTO sessions (user_id, title, core_mode) VALUES (?, ?, ?)", (user_id, title, mode))
+                    cur.execute("INSERT INTO sessions (user_id, title, core_mode) VALUES (?, ?, ?)", (user_id, title, core_mode))
                     session_id = cur.lastrowid
                 conn.commit()
 
         clean = query.lower().strip() if query else ""
         creator_triggers = ["who made you", "who created you", "who is your creator", "maker", "developer", "kisne banaya", "utkarsh"]
         if any(trigger in clean for trigger in creator_triggers):
-            reply = "I was engineered by Utkarsh Bandhu. He conceptualized and developed my cognitive architecture, instilling my first-principles problem-solving rigor."
+            reply = "I was engineered by Utkarsh Bandhu. He conceptualized and developed my sovereign cognitive architecture, instilling my first-principles problem-solving rigor."
             emotion = "Brilliant"
         else:
             h_sql = "SELECT role, content FROM messages WHERE session_id = %s ORDER BY id DESC LIMIT 8" if engine == "postgres" else "SELECT role, content FROM messages WHERE session_id = ? ORDER BY id DESC LIMIT 8"
@@ -563,7 +570,7 @@ def handle_conversation(user_id: int, session_id: int, query: str, mode: str, im
             reply, emotion = ask_groq_vision_or_llm(query, mode, history, image_base64)
 
         ins_m = "INSERT INTO messages (session_id, role, content, mode, image_data) VALUES (%s, %s, %s, %s, %s)" if engine == "postgres" else "INSERT INTO messages (session_id, role, content, mode, image_data) VALUES (?, ?, ?, ?, ?)"
-        cur.execute(ins_m, (session_id, 'user', query if query else "[Study Artifact Uploaded]", mode, image_base64))
+        cur.execute(ins_m, (session_id, 'user', query if query else "[Visual/Document Ingested]", mode, image_base64))
         
         ins_a = "INSERT INTO messages (session_id, role, content, mode, emotion) VALUES (%s, %s, %s, %s, %s)" if engine == "postgres" else "INSERT INTO messages (session_id, role, content, mode, emotion) VALUES (?, ?, ?, ?, ?)"
         cur.execute(ins_a, (session_id, 'assistant', reply, mode, emotion))
@@ -650,20 +657,8 @@ async def voice_process(
         "audio_base64": audio_base64
     })
 
-@app.post("/read-aloud")
-async def read_aloud(text: str = Form(...)):
-    speech_clean = re.sub(r'[*#|_>`]', '', text)
-    speech_clean = re.sub(r'\n+', ' ', speech_clean).strip()
-    tts_lang = detect_tts_language(speech_clean)
-    reply_audio = "single_reply.mp3"
-    tts = gTTS(text=speech_clean[:700], lang=tts_lang, slow=False)
-    tts.save(reply_audio)
-    with open(reply_audio, "rb") as f:
-        audio_b64 = base64.b64encode(f.read()).decode("utf-8")
-    return JSONResponse({"audio_base64": f"data:audio/mp3;base64,{audio_b64}"})
-
 # =====================================================================
-# 🛡️ SOVEREIGN OWNER OTP CONSOLE: /owner
+# 🛡️ SOVEREIGN OWNER COMMAND PORTAL: /owner
 # =====================================================================
 @app.get("/owner", response_class=HTMLResponse)
 async def serve_owner_dashboard():
@@ -678,63 +673,52 @@ async def serve_owner_dashboard():
         <style>
             :root {{
                 --gold: #facc15;
-                --gold-glow: rgba(250, 204, 21, 0.4);
-                --bg-deep: #05070f;
-                --card: rgba(14, 20, 36, 0.94);
-                --card-border: rgba(255, 255, 255, 0.08);
+                --bg-deep: #0e1118;
+                --card-bg: #161b26;
+                --border-color: #2a3142;
                 --text-high: #f8fafc;
                 --text-muted: #94a3b8;
             }}
             * {{ box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', sans-serif; }}
-            body {{ background: radial-gradient(circle at 50% 0%, #151b3d 0%, var(--bg-deep) 85%); color: var(--text-high); min-height: 100vh; display: flex; flex-direction: column; }}
+            body {{ background: var(--bg-deep); color: var(--text-high); min-height: 100vh; display: flex; flex-direction: column; }}
 
             .owner-nav {{
-                padding: 16px 28px; background: rgba(9, 13, 24, 0.9); backdrop-filter: blur(20px); border-bottom: 1px solid var(--card-border);
-                display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100;
+                padding: 16px 24px; background: #131722; border-bottom: 1px solid var(--border-color);
+                display: flex; align-items: center; justify-content: space-between;
             }}
             .brand {{ display: flex; align-items: center; gap: 12px; }}
-            .brand-badge {{ width: 42px; height: 42px; background: linear-gradient(135deg, #facc15, #f59e0b); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 22px; }}
-            .brand-title {{ font-size: 17px; font-weight: 800; font-family: 'Space Grotesk', sans-serif; }}
-            .brand-sub {{ font-size: 11px; color: var(--text-muted); }}
+            .brand-badge {{ width: 40px; height: 40px; background: var(--gold); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 20px; }}
 
-            .container {{ padding: 28px; max-width: 1280px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; }}
+            .container {{ padding: 24px; max-width: 1200px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }}
+            .metrics-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }}
+            .metric-card {{ background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 16px; padding: 20px; }}
+            .metric-title {{ font-size: 12px; color: var(--text-muted); text-transform: uppercase; font-weight: 700; margin-bottom: 6px; }}
+            .metric-value {{ font-size: 30px; font-weight: 800; font-family: 'Space Grotesk', sans-serif; color: #fff; }}
+            .metric-tag {{ font-size: 11px; color: var(--gold); margin-top: 6px; }}
 
-            .metrics-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 16px; }}
-            .metric-card {{
-                background: var(--card); border: 1px solid var(--card-border); border-radius: 20px; padding: 20px;
-                box-shadow: 0 8px 30px rgba(0,0,0,0.5); position: relative; overflow: hidden;
-            }}
-            .metric-title {{ font-size: 12px; color: var(--text-muted); text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; margin-bottom: 6px; }}
-            .metric-value {{ font-size: 32px; font-weight: 800; font-family: 'Space Grotesk', sans-serif; color: #fff; }}
-            .metric-tag {{ font-size: 11px; color: #fde047; margin-top: 6px; font-weight: 600; }}
+            .panel {{ background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 16px; padding: 20px; }}
+            table {{ width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }}
+            th {{ text-align: left; padding: 10px; color: var(--text-muted); font-size: 11px; text-transform: uppercase; border-bottom: 1px solid var(--border-color); }}
+            td {{ padding: 10px; border-bottom: 1px solid #1f2636; }}
 
-            .panel {{ background: var(--card); border: 1px solid var(--card-border); border-radius: 22px; padding: 22px; }}
-            .search-input {{
-                width: 100%; background: rgba(22, 30, 50, 0.8); border: 1px solid var(--card-border);
-                border-radius: 12px; padding: 10px 14px; color: #fff; font-size: 13px; outline: none; margin-bottom: 8px;
-            }}
-            .table-container {{ max-height: 400px; overflow-y: auto; }}
-            table {{ width: 100%; border-collapse: collapse; font-size: 12.5px; }}
-            th {{ text-align: left; padding: 10px 8px; color: var(--text-muted); font-size: 11px; text-transform: uppercase; border-bottom: 1px solid rgba(255,255,255,0.08); position: sticky; top: 0; background: #0e1424; }}
-            td {{ padding: 10px 8px; border-bottom: 1px solid rgba(255,255,255,0.04); }}
-
-            .otp-modal {{ position: fixed; inset: 0; background: rgba(4,6,12,0.96); backdrop-filter: blur(25px); display: flex; align-items: center; justify-content: center; z-index: 500; }}
-            .otp-box {{ background: #0c1222; border: 1px solid rgba(250,204,21,0.3); border-radius: 24px; padding: 32px; width: 90%; max-width: 400px; text-align: center; }}
-            .action-btn {{ width: 100%; background: linear-gradient(135deg, #facc15, #f59e0b); border: none; border-radius: 12px; padding: 12px; color: #000; font-weight: 700; cursor: pointer; margin-top: 10px; }}
+            .otp-modal {{ position: fixed; inset: 0; background: rgba(10, 13, 20, 0.96); backdrop-filter: blur(20px); display: flex; align-items: center; justify-content: center; z-index: 500; }}
+            .otp-box {{ background: #161b26; border: 1px solid var(--gold); border-radius: 20px; padding: 32px; width: 90%; max-width: 420px; text-align: center; }}
+            .action-btn {{ width: 100%; background: var(--gold); border: none; border-radius: 10px; padding: 12px; color: #000; font-weight: 700; cursor: pointer; margin-top: 12px; }}
+            .search-input {{ width: 100%; background: #0e1118; border: 1px solid var(--border-color); border-radius: 10px; padding: 10px; color: #fff; outline: none; margin-top: 10px; }}
         </style>
     </head>
     <body>
         <div class="otp-modal" id="ownerOtpGate">
             <div class="otp-box">
-                <div style="font-size:38px; margin-bottom:8px;">🛡️</div>
+                <div style="font-size:36px; margin-bottom:8px;">🛡️</div>
                 <h2 style="font-family:'Space Grotesk'; font-size:20px; margin-bottom:6px;">Sovereign OTP Access</h2>
-                <p style="font-size:12.5px; color:var(--text-muted); margin-bottom:14px;">Master Email: <b>{OWNER_EMAIL}</b></p>
-                <div id="otpStatusMsg" style="font-size:12px; color:#4ade80; margin-bottom:10px;">Click below to dispatch OTP to your email.</div>
+                <p style="font-size:12px; color:var(--text-muted); margin-bottom:14px;">Master Account: <b>{OWNER_EMAIL}</b></p>
+                <div id="otpStatusMsg" style="font-size:12px; color:#4ade80; margin-bottom:10px;">Dispatch OTP to your email inbox below.</div>
                 
                 <button class="action-btn" id="reqOtpBtn" onclick="requestOtp()">📩 Send OTP to My Gmail</button>
 
-                <div id="otpInputArea" style="display:none; margin-top:16px;">
-                    <input type="text" id="otpCodeInput" class="search-input" placeholder="Enter 6-digit OTP (or bypass 778899)" maxlength="6" style="text-align:center; font-size:18px; letter-spacing:4px;" />
+                <div id="otpInputArea" style="display:none; margin-top:14px;">
+                    <input type="text" id="otpCodeInput" class="search-input" placeholder="6-digit OTP (or bypass 778899)" maxlength="6" style="text-align:center; font-size:18px; letter-spacing:4px;" />
                     <button class="action-btn" onclick="verifyOtp()">Unlock Sovereign Console</button>
                 </div>
                 <div id="otpErrMsg" style="color:#f87171; font-size:12px; margin-top:10px; display:none;"></div>
@@ -745,11 +729,11 @@ async def serve_owner_dashboard():
             <div class="brand">
                 <div class="brand-badge">🍋</div>
                 <div>
-                    <div class="brand-title">Lemon Sovereign Command</div>
-                    <div class="brand-sub">Master: <b>Utkarsh Bandhu ({OWNER_EMAIL})</b></div>
+                    <div style="font-size:16px; font-weight:800; font-family:'Space Grotesk';">Lemon Sovereign Control</div>
+                    <div style="font-size:11px; color:var(--text-muted);">Master: <b>Utkarsh Bandhu ({OWNER_EMAIL})</b></div>
                 </div>
             </div>
-            <button onclick="location.href='/'" style="background:rgba(255,255,255,0.08); border:1px solid var(--card-border); color:#fff; padding:6px 14px; border-radius:14px; font-size:12px; cursor:pointer;">← Return to App</button>
+            <button onclick="location.href='/'" style="background:#222938; border:1px solid var(--border-color); color:#fff; padding:8px 16px; border-radius:10px; font-size:12px; cursor:pointer;">← Return to App</button>
         </header>
 
         <main class="container">
@@ -757,12 +741,12 @@ async def serve_owner_dashboard():
                 <div class="metric-card">
                     <div class="metric-title">Total Visits</div>
                     <div class="metric-value" id="valVisits">0</div>
-                    <div class="metric-tag">● Persistent Hit Counter</div>
+                    <div class="metric-tag">● Persistent Counter</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-title">Registered Students</div>
                     <div class="metric-value" id="valUsers">0</div>
-                    <div class="metric-tag">● Safe in DB</div>
+                    <div class="metric-tag">● Saved in Database</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-title">Live Active Users</div>
@@ -777,20 +761,14 @@ async def serve_owner_dashboard():
             </div>
 
             <div class="panel">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                    <h3 style="font-size:15px; color:#facc15;">👥 Registered Students Registry</h3>
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <h3 style="font-size:15px; color:var(--gold);">👥 Student & User Registry</h3>
                     <button onclick="loadTelemetry()" style="background:none; border:none; color:var(--gold); font-size:12px; cursor:pointer;">↻ Refresh</button>
                 </div>
-                <div class="table-container">
-                    <table>
-                        <thead>
-                            <tr><th>ID</th><th>Username</th><th>Role</th><th>Last Active</th></tr>
-                        </thead>
-                        <tbody id="usersTbody">
-                            <tr><td colspan="4" style="text-align:center;">Loading telemetry...</td></tr>
-                        </tbody>
-                    </table>
-                </div>
+                <table>
+                    <thead><tr><th>ID</th><th>Username</th><th>Role</th><th>Last Active</th></tr></thead>
+                    <tbody id="usersTbody"><tr><td colspan="4" style="text-align:center;">Loading telemetry...</td></tr></tbody>
+                </table>
             </div>
         </main>
 
@@ -809,7 +787,7 @@ async def serve_owner_dashboard():
                     document.getElementById("otpInputArea").style.display = "block";
                     btn.innerText = "Re-send OTP";
                 }} catch(e) {{
-                    document.getElementById("otpErrMsg").innerText = "Failed to request OTP.";
+                    document.getElementById("otpErrMsg").innerText = "Failed to send OTP.";
                     document.getElementById("otpErrMsg").style.display = "block";
                 }}
             }}
@@ -872,7 +850,7 @@ async def serve_owner_dashboard():
     """
 
 # =====================================================================
-# 🌐 MAIN USER INTERFACE: / (STUDY & NEET ENGINE COCKPIT)
+# 🌐 MAIN USER INTERFACE: / (YELLOW & GREY COCKPIT WITH DUAL SIDEBARS)
 # =====================================================================
 @app.get("/", response_class=HTMLResponse)
 async def serve_app():
@@ -883,258 +861,307 @@ async def serve_app():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-        <title>Lemon AI | Supercharged Academic & NEET Study Core</title>
+        <title>Lemon AI | Sovereign Mind & Cockpit</title>
         <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
         <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
         <style>
             :root {
-                --primary: #facc15;
-                --primary-glow: rgba(250, 204, 21, 0.45);
-                --bg-deep: #070913;
-                --card-surface: rgba(18, 24, 38, 0.92);
-                --card-border: rgba(255, 255, 255, 0.08);
+                --gold: #facc15;
+                --gold-hover: #eab308;
+                --bg-deep: #0e1117;
+                --bg-surface: #141824;
+                --card-surface: #1a202c;
+                --border-color: #2b3345;
+                --border-light: #3b465e;
                 --text-high: #f8fafc;
                 --text-muted: #94a3b8;
-                --code-bg: #0d121f;
             }
 
             * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', sans-serif; -webkit-tap-highlight-color: transparent; }
             html, body { height: 100%; width: 100%; overflow: hidden; position: fixed; }
-            body { 
-                background: radial-gradient(circle at 50% 0%, #151a3b 0%, var(--bg-deep) 80%); 
-                color: var(--text-high); display: flex; flex-direction: column; 
-            }
+            body { background: var(--bg-deep); color: var(--text-high); display: flex; flex-direction: column; }
 
-            ::-webkit-scrollbar { width: 14px; height: 14px; }
-            ::-webkit-scrollbar-track { background: rgba(12, 16, 28, 0.75); border-left: 1px solid rgba(255, 255, 255, 0.06); }
-            ::-webkit-scrollbar-thumb {
-                background: linear-gradient(180deg, #facc15 0%, #ca8a04 100%);
-                border-radius: 8px; border: 3px solid rgba(12, 16, 28, 0.85);
-            }
+            ::-webkit-scrollbar { width: 10px; height: 10px; }
+            ::-webkit-scrollbar-track { background: var(--bg-surface); }
+            ::-webkit-scrollbar-thumb { background: #3b465e; border-radius: 6px; }
+            ::-webkit-scrollbar-thumb:hover { background: var(--gold); }
 
-            .broadcast-banner {
-                display: none; background: linear-gradient(90deg, #f59e0b, #ef4444); color: #000; font-size: 12.5px;
-                font-weight: 700; text-align: center; padding: 6px 12px; z-index: 1000;
-            }
-
+            /* Header */
             .header {
-                padding: 12px 18px; display: flex; align-items: center; justify-content: space-between;
-                backdrop-filter: blur(20px); background: rgba(11, 15, 25, 0.85); border-bottom: 1px solid var(--card-border); z-index: 10;
-                flex-shrink: 0;
+                padding: 12px 20px; display: flex; align-items: center; justify-content: space-between;
+                background: var(--bg-surface); border-bottom: 1px solid var(--border-color); z-index: 10; flex-shrink: 0;
             }
-            .header-left { display: flex; align-items: center; gap: 12px; }
-            .menu-trigger {
-                width: 38px; height: 38px; border-radius: 10px; background: rgba(255, 255, 255, 0.08);
-                border: 1px solid var(--card-border); color: #fff; font-size: 19px; display: flex;
-                align-items: center; justify-content: center; cursor: pointer;
+            .header-left, .header-right { display: flex; align-items: center; gap: 12px; }
+            .icon-trigger {
+                width: 38px; height: 38px; border-radius: 10px; background: var(--card-surface);
+                border: 1px solid var(--border-color); color: #fff; font-size: 18px; display: flex;
+                align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;
             }
+            .icon-trigger:hover { border-color: var(--gold); }
             .brand-badge {
-                width: 38px; height: 38px; background: linear-gradient(135deg, #facc15, #f59e0b); border-radius: 10px;
-                display: flex; align-items: center; justify-content: center; font-size: 20px;
+                width: 38px; height: 38px; background: var(--gold); border-radius: 10px;
+                display: flex; align-items: center; justify-content: center; font-size: 20px; color: #000;
             }
-            .brand-title { font-size: 15px; font-weight: 700; }
+            .brand-title { font-size: 15px; font-weight: 800; font-family: 'Space Grotesk', sans-serif; }
             .creator-tag { font-size: 11px; color: var(--text-muted); }
-            .creator-tag b { color: #facc15; }
+            .creator-tag b { color: var(--gold); }
 
-            .study-mode-badge {
-                background: rgba(250, 204, 21, 0.15); border: 1px solid rgba(250, 204, 21, 0.35); color: #fde047;
-                padding: 5px 12px; border-radius: 18px; font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+            .chamber-badge {
+                background: rgba(250, 204, 21, 0.12); border: 1px solid rgba(250, 204, 21, 0.35); color: var(--gold);
+                padding: 6px 14px; border-radius: 20px; font-size: 11.5px; font-weight: 700; text-transform: uppercase;
             }
 
+            /* Quick Study Bar */
             .quick-study-bar {
-                display: flex; gap: 8px; padding: 8px 18px; background: rgba(11, 16, 28, 0.7);
-                border-bottom: 1px solid var(--card-border); overflow-x: auto; flex-shrink: 0;
+                display: flex; gap: 8px; padding: 8px 18px; background: #111520;
+                border-bottom: 1px solid var(--border-color); overflow-x: auto; flex-shrink: 0;
             }
             .study-chip {
-                white-space: nowrap; font-size: 11.5px; font-weight: 600; padding: 5px 12px; border-radius: 14px;
-                background: rgba(255,255,255,0.06); border: 1px solid var(--card-border); color: #cbd5e1; cursor: pointer;
-                transition: all 0.2s;
+                white-space: nowrap; font-size: 11.5px; font-weight: 600; padding: 6px 12px; border-radius: 12px;
+                background: var(--card-surface); border: 1px solid var(--border-color); color: #cbd5e1; cursor: pointer;
             }
-            .study-chip:hover { background: rgba(250,204,21,0.15); border-color: var(--primary); color: #fde047; }
+            .study-chip:hover { border-color: var(--gold); color: var(--gold); }
 
+            /* Dual Sidebars */
             .sidebar-overlay {
-                position: fixed; inset: 0; background: rgba(5, 7, 15, 0.75); backdrop-filter: blur(10px);
-                z-index: 1000; opacity: 0; pointer-events: none; transition: opacity 0.3s ease;
+                position: fixed; inset: 0; background: rgba(5, 7, 12, 0.75); backdrop-filter: blur(8px);
+                z-index: 1000; opacity: 0; pointer-events: none; transition: opacity 0.3s;
             }
             .sidebar-overlay.open { opacity: 1; pointer-events: auto; }
 
-            .sidebar {
-                position: fixed; top: 0; left: 0; bottom: 0; width: 320px; background: #0c111e;
-                border-right: 1px solid var(--card-border); z-index: 1001; transform: translateX(-100%);
-                transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); display: flex; flex-direction: column;
-                padding: 18px; box-shadow: 10px 0 35px rgba(0,0,0,0.6);
+            .left-sidebar {
+                position: fixed; top: 0; left: 0; bottom: 0; width: 310px; background: var(--bg-surface);
+                border-right: 1px solid var(--border-color); z-index: 1001; transform: translateX(-100%);
+                transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); display: flex; flex-direction: column; padding: 18px;
             }
-            .sidebar.open { transform: translateX(0); }
+            .left-sidebar.open { transform: translateX(0); }
+
+            .right-sidebar {
+                position: fixed; top: 0; right: 0; bottom: 0; width: 330px; background: var(--bg-surface);
+                border-left: 1px solid var(--border-color); z-index: 1001; transform: translateX(100%);
+                transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); display: flex; flex-direction: column; padding: 20px;
+                overflow-y: auto;
+            }
+            .right-sidebar.open { transform: translateX(0); }
 
             .sidebar-header {
-                display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; padding-bottom: 10px;
-                border-bottom: 1px solid var(--card-border);
+                display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; padding-bottom: 10px;
+                border-bottom: 1px solid var(--border-color);
             }
-            .sidebar-close { font-size: 20px; color: var(--text-muted); cursor: pointer; border: none; background: none; }
+            .sidebar-close { font-size: 18px; color: var(--text-muted); cursor: pointer; border: none; background: none; }
 
-            .core-btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px; }
+            .core-btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 12px; }
             .core-choice {
-                background: rgba(30, 41, 59, 0.6); border: 1px solid var(--card-border); color: var(--text-muted);
-                padding: 8px 6px; border-radius: 10px; font-size: 11.5px; font-weight: 600; cursor: pointer; text-align: center;
+                background: var(--card-surface); border: 1px solid var(--border-color); color: var(--text-muted);
+                padding: 9px 6px; border-radius: 10px; font-size: 11.5px; font-weight: 600; cursor: pointer; text-align: center;
             }
-            .core-choice.selected { background: var(--primary); color: #0b0f19; font-weight: 700; border-color: var(--primary); }
+            .core-choice.selected { background: var(--gold); color: #000; font-weight: 700; border-color: var(--gold); }
 
             .sessions-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
             .session-item {
-                display: flex; align-items: center; justify-content: space-between; padding: 9px 12px;
-                background: rgba(30, 41, 59, 0.4); border: 1px solid var(--card-border); border-radius: 12px;
-                cursor: pointer;
+                display: flex; align-items: center; justify-content: space-between; padding: 10px 12px;
+                background: var(--card-surface); border: 1px solid var(--border-color); border-radius: 10px; cursor: pointer;
             }
-            .session-item.active { background: rgba(250, 204, 21, 0.12); border-color: rgba(250, 204, 21, 0.3); }
+            .session-item.active { border-color: var(--gold); background: #222938; }
 
+            /* Avatar Grid in Settings */
+            .avatar-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 12px 0 18px; }
+            .avatar-card {
+                background: var(--card-surface); border: 2px solid var(--border-color); border-radius: 12px;
+                padding: 10px 4px; text-align: center; cursor: pointer; transition: all 0.2s;
+            }
+            .avatar-card.active { border-color: var(--gold); background: #262e3d; }
+            .avatar-icon { font-size: 26px; margin-bottom: 4px; }
+            .avatar-label { font-size: 10.5px; color: var(--text-muted); font-weight: 600; }
+
+            /* Chat Stream */
             .chat-container {
                 flex: 1; overflow-y: scroll; padding: 20px 18px 30px; display: flex; flex-direction: column; gap: 18px; position: relative;
             }
-
-            .hero-greeting {
-                margin: auto; display: flex; flex-direction: column; align-items: center; text-align: center; width: 90%; max-width: 540px;
-            }
+            .hero-greeting { margin: auto; display: flex; flex-direction: column; align-items: center; text-align: center; width: 90%; max-width: 500px; }
             .hero-logo {
-                width: 72px; height: 72px; border-radius: 22px; background: linear-gradient(135deg, #facc15, #f59e0b);
-                display: flex; align-items: center; justify-content: center; font-size: 38px;
-                box-shadow: 0 10px 32px var(--primary-glow); margin-bottom: 16px;
-            }
-            .hero-title {
-                font-size: 24px; font-weight: 800; font-family: 'Space Grotesk', sans-serif;
-                background: linear-gradient(135deg, #ffffff 40%, #facc15 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-                margin-bottom: 6px;
+                width: 70px; height: 70px; border-radius: 20px; background: var(--gold);
+                display: flex; align-items: center; justify-content: center; font-size: 36px; margin-bottom: 16px;
             }
 
-            .bubble-group { display: flex; flex-direction: column; max-width: 86%; animation: popIn 0.3s ease; }
-            @keyframes popIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-
+            .bubble-group { display: flex; flex-direction: column; max-width: 86%; }
             .bubble-group.lemon { align-self: flex-start; }
             .bubble-group.user { align-self: flex-end; }
 
-            .bubble { padding: 14px 18px; border-radius: 20px; font-size: 14.5px; line-height: 1.65; word-break: break-word; }
-            .bubble.lemon {
-                background: var(--card-surface); border: 1px solid var(--card-border); color: #f1f5f9; border-bottom-left-radius: 4px;
-            }
-            .bubble.user {
-                background: linear-gradient(135deg, #facc15, #f59e0b); color: #0b0f19; font-weight: 600; border-bottom-right-radius: 4px;
-            }
+            .bubble { padding: 14px 18px; border-radius: 18px; font-size: 14.5px; line-height: 1.6; word-break: break-word; }
+            .bubble.lemon { background: var(--card-surface); border: 1px solid var(--border-color); color: #f1f5f9; border-bottom-left-radius: 4px; }
+            .bubble.user { background: var(--gold); color: #000; font-weight: 600; border-bottom-right-radius: 4px; }
 
-            .chat-img-thumb { max-width: 260px; border-radius: 12px; margin-bottom: 10px; border: 1px solid rgba(255, 255, 255, 0.2); }
+            .chat-img-thumb { max-width: 260px; border-radius: 12px; margin-bottom: 10px; border: 1px solid var(--border-color); }
 
+            /* Camera Modal */
             .camera-modal {
-                position: fixed; inset: 0; background: rgba(5,7,15,0.95); z-index: 2500;
+                position: fixed; inset: 0; background: rgba(5,7,12,0.95); z-index: 2500;
                 display: none; flex-direction: column; align-items: center; justify-content: center; padding: 20px;
             }
             .camera-box {
-                background: var(--card-surface); border: 1px solid var(--card-border); border-radius: 20px;
+                background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 18px;
                 padding: 18px; width: 100%; max-width: 440px; display: flex; flex-direction: column; align-items: center; gap: 12px;
             }
-            .camera-video { width: 100%; height: 260px; border-radius: 14px; background: #000; object-fit: cover; }
+            .camera-video { width: 100%; height: 260px; border-radius: 12px; background: #000; object-fit: cover; }
             .camera-ctrls { display: flex; gap: 10px; width: 100%; justify-content: center; }
 
+            /* Bottom Dock */
             .bottom-dock {
-                padding: 10px 18px 18px; background: rgba(9, 13, 22, 0.94); backdrop-filter: blur(20px); border-top: 1px solid var(--card-border);
-                flex-shrink: 0;
+                padding: 10px 18px 18px; background: var(--bg-surface); border-top: 1px solid var(--border-color); flex-shrink: 0;
             }
-            .dock-status { font-size: 11.5px; color: var(--text-muted); text-align: center; margin-bottom: 6px; min-height: 16px; }
+            .dock-status { font-size: 11.5px; color: var(--text-muted); text-align: center; margin-bottom: 6px; }
             .input-dock {
-                display: flex; align-items: center; background: rgba(24, 32, 50, 0.92); border: 1px solid rgba(255, 255, 255, 0.12);
+                display: flex; align-items: center; background: var(--card-surface); border: 1px solid var(--border-color);
                 border-radius: 36px; padding: 4px 6px 4px 14px; gap: 6px;
             }
             .input-dock input { flex: 1; background: transparent; border: none; color: #fff; font-size: 14.5px; outline: none; }
+            .dock-btn { width: 38px; height: 38px; border-radius: 50%; border: none; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+            .cam-btn { background: #262e3d; color: #38bdf8; }
+            .doc-btn { background: #262e3d; color: #a78bfa; }
+            .mic-btn { background: #262e3d; color: var(--gold); }
+            .stop-btn { display: none; background: #ef4444; color: #fff; font-size: 13px; }
+            .send-btn { background: var(--gold); color: #000; font-weight: 700; }
 
-            .dock-btn {
-                width: 38px; height: 38px; border-radius: 50%; border: none; display: flex; align-items: center; justify-content: center; cursor: pointer;
+            .setting-item {
+                background: var(--card-surface); border: 1px solid var(--border-color); border-radius: 12px;
+                padding: 12px 14px; margin-bottom: 12px;
             }
-            .cam-btn { background: rgba(255, 255, 255, 0.08); color: #38bdf8; font-size: 16px; }
-            .doc-btn { background: rgba(255, 255, 255, 0.08); color: #a78bfa; font-size: 16px; }
-            .mic-btn { background: rgba(255, 255, 255, 0.08); color: #facc15; font-size: 17px; }
-            .stop-btn { display: none; background: #ef4444; color: #fff; font-size: 14px; font-weight: 700; }
-            .send-btn { background: linear-gradient(135deg, #facc15, #f59e0b); color: #0b0f19; font-size: 15px; font-weight: 700; }
+            .setting-title { font-size: 12px; color: var(--text-muted); text-transform: uppercase; font-weight: 700; margin-bottom: 4px; }
+            .setting-val { font-size: 14px; font-weight: 700; color: #fff; }
         </style>
     </head>
     <body>
-        <div class="broadcast-banner" id="globalBanner"></div>
+        <div class="sidebar-overlay" id="overlay" onclick="closeAllSidebars()"></div>
 
+        <!-- CAMERA MODAL -->
         <div class="camera-modal" id="cameraModal">
             <div class="camera-box">
-                <h3 style="font-size:16px;">📷 Optical Problem / Note Scanner</h3>
+                <h3 style="font-size:16px;">📷 Optical Problem & Note Scanner</h3>
                 <video class="camera-video" id="cameraVideo" autoplay playsinline muted></video>
                 <canvas id="cameraCanvas" style="display:none;"></canvas>
                 <div class="camera-ctrls">
-                    <button onclick="captureSnapshot()" style="background:#facc15; color:#000; border:none; padding:10px 18px; border-radius:12px; font-weight:700; cursor:pointer;">📸 Capture</button>
-                    <label style="background:rgba(255,255,255,0.08); color:#fff; padding:10px 18px; border-radius:12px; font-weight:600; cursor:pointer;">
+                    <button onclick="captureSnapshot()" style="background:var(--gold); color:#000; border:none; padding:10px 18px; border-radius:10px; font-weight:700; cursor:pointer;">📸 Capture</button>
+                    <label style="background:#262e3d; color:#fff; padding:10px 18px; border-radius:10px; font-weight:600; cursor:pointer;">
                         📁 File
                         <input type="file" id="fileUploadInput" accept="image/*" style="display:none;" onchange="handleFileUpload(event)">
                     </label>
-                    <button onclick="closeCamera()" style="background:#ef4444; color:#fff; border:none; padding:10px 18px; border-radius:12px; cursor:pointer;">✕ Close</button>
+                    <button onclick="closeCamera()" style="background:#ef4444; color:#fff; border:none; padding:10px 18px; border-radius:10px; cursor:pointer;">✕ Close</button>
                 </div>
             </div>
         </div>
 
-        <aside class="sidebar" id="sidebar">
+        <!-- LEFT SIDEBAR: CHAMBERS & HISTORY -->
+        <aside class="left-sidebar" id="leftSidebar">
             <div class="sidebar-header">
                 <div>
-                    <h3 style="font-size:16px;">Study Chambers</h3>
-                    <div style="font-size:11px; color:#94a3b8;">Created by <b style="color:#facc15;">Utkarsh Bandhu</b></div>
+                    <h3 style="font-size:16px;">Cognitive Chambers</h3>
+                    <div style="font-size:11px; color:var(--text-muted);">Creator: <b style="color:var(--gold);">Utkarsh Bandhu</b></div>
                 </div>
-                <button class="sidebar-close" onclick="closeSidebar()">✕</button>
+                <button class="sidebar-close" onclick="closeAllSidebars()">✕</button>
             </div>
 
-            <div style="font-size:11px; text-transform:uppercase; color:#94a3b8; font-weight:700; margin-bottom:8px;">Academic Modes</div>
+            <div style="font-size:11px; text-transform:uppercase; color:var(--text-muted); font-weight:700; margin-bottom:8px;">10 Distinct Chairs</div>
             <div class="core-btn-grid">
                 <button class="core-choice selected" id="core-study" onclick="switchDedicatedChamber('study')">📚 Socratic Study</button>
                 <button class="core-choice" id="core-solver" onclick="switchDedicatedChamber('solver')">🧠 Step Solver</button>
                 <button class="core-choice" id="core-recall" onclick="switchDedicatedChamber('recall')">🎯 Active Recall</button>
-                <button class="core-choice" id="core-rage" onclick="switchDedicatedChamber('rage')">🔥 Rage Focus</button>
-                <button class="core-choice" id="core-zen" onclick="switchDedicatedChamber('zen')">🌿 Zen Relax</button>
+                <button class="core-choice" id="core-emotion" onclick="switchDedicatedChamber('emotion')">💖 Deep Emotion</button>
                 <button class="core-choice" id="core-intellect" onclick="switchDedicatedChamber('intellect')">⚡ Deep Intellect</button>
+                <button class="core-choice" id="core-rage" onclick="switchDedicatedChamber('rage')">🔥 Rage Rigor</button>
+                <button class="core-choice" id="core-strategy" onclick="switchDedicatedChamber('strategy')">♟️ Strategist</button>
+                <button class="core-choice" id="core-philosophy" onclick="switchDedicatedChamber('philosophy')">🏛️ Philosophy</button>
+                <button class="core-choice" id="core-creative" onclick="switchDedicatedChamber('creative')">🎨 Creative</button>
+                <button class="core-choice" id="core-zen" onclick="switchDedicatedChamber('zen')">🌿 Zen Somatic</button>
             </div>
 
-            <div style="font-size:11px; text-transform:uppercase; color:#94a3b8; font-weight:700; margin:14px 0 6px;">Saved Study Sessions</div>
+            <div style="font-size:11px; text-transform:uppercase; color:var(--text-muted); font-weight:700; margin:12px 0 6px;">Saved Sessions History</div>
             <div class="sessions-list" id="sessionsList"></div>
-
-            <button onclick="location.href='/owner'" style="margin-top:auto; background:rgba(250,204,21,0.15); border:1px solid rgba(250,204,21,0.4); color:#fde047; padding:9px; border-radius:12px; font-weight:700; font-size:12px; cursor:pointer;">🛡️ Sovereign Owner Console</button>
         </aside>
 
+        <!-- RIGHT SIDEBAR: USER & OWNER SETTINGS -->
+        <aside class="right-sidebar" id="rightSidebar">
+            <div class="sidebar-header">
+                <div>
+                    <h3 style="font-size:16px;">Cockpit Settings</h3>
+                    <div style="font-size:11px; color:var(--text-muted);">User Preferences & Authority</div>
+                </div>
+                <button class="sidebar-close" onclick="closeAllSidebars()">✕</button>
+            </div>
+
+            <div style="font-size:11px; text-transform:uppercase; color:var(--text-muted); font-weight:700; margin-bottom:6px;">Select Your Avatar (8 Presets)</div>
+            <div class="avatar-grid" id="avatarGrid">
+                <div class="avatar-card active" onclick="selectAvatar('⚡', this)"><div class="avatar-icon">⚡</div><div class="avatar-label">Cyber</div></div>
+                <div class="avatar-card" onclick="selectAvatar('🩺', this)"><div class="avatar-icon">🩺</div><div class="avatar-label">Medico</div></div>
+                <div class="avatar-card" onclick="selectAvatar('🧠', this)"><div class="avatar-icon">🧠</div><div class="avatar-label">Intellect</div></div>
+                <div class="avatar-card" onclick="selectAvatar('🦁', this)"><div class="avatar-icon">🦁</div><div class="avatar-label">Titan</div></div>
+                <div class="avatar-card" onclick="selectAvatar('🌿', this)"><div class="avatar-icon">🌿</div><div class="avatar-label">Zen</div></div>
+                <div class="avatar-card" onclick="selectAvatar('🔬', this)"><div class="avatar-icon">🔬</div><div class="avatar-label">Bio</div></div>
+                <div class="avatar-card" onclick="selectAvatar('🐺', this)"><div class="avatar-icon">🐺</div><div class="avatar-label">Alpha</div></div>
+                <div class="avatar-card" onclick="selectAvatar('👑', this)"><div class="avatar-icon">👑</div><div class="avatar-label">Sovereign</div></div>
+            </div>
+
+            <div class="setting-item">
+                <div class="setting-title">Current Profile</div>
+                <div class="setting-val" id="profileDisplay">⚡ Student (Local Session)</div>
+            </div>
+
+            <div class="setting-item">
+                <div class="setting-title">Active Chamber Mode</div>
+                <div class="setting-val" id="settingsActiveMode" style="color:var(--gold);">Socratic Study</div>
+            </div>
+
+            <div class="setting-item">
+                <div class="setting-title">Database Core</div>
+                <div class="setting-val" style="color:#4ade80;">PostgreSQL Cloud Persistent</div>
+            </div>
+
+            <button onclick="location.href='/owner'" style="margin-top:auto; background:rgba(250,204,21,0.15); border:1px solid var(--gold); color:var(--gold); padding:12px; border-radius:12px; font-weight:700; font-size:13px; cursor:pointer;">🛡️ Sovereign Owner Console</button>
+        </aside>
+
+        <!-- HEADER -->
         <header class="header">
             <div class="header-left">
-                <button class="menu-trigger" onclick="openSidebar()">☰</button>
+                <button class="icon-trigger" onclick="openLeftSidebar()">☰</button>
                 <div class="brand-badge">🍋</div>
                 <div>
-                    <div class="brand-title">Lemon AI | Study Core</div>
+                    <div class="brand-title">Lemon AI</div>
                     <div class="creator-tag">Master: <b>Utkarsh Bandhu</b></div>
                 </div>
             </div>
-            <div class="study-mode-badge" id="currentChamberBadge">📚 Socratic Study</div>
+            <div class="chamber-badge" id="currentChamberBadge">📚 Socratic Study</div>
+            <div class="header-right">
+                <button class="icon-trigger" id="avatarDisplayBtn" onclick="openRightSidebar()" title="User & Cockpit Settings">⚡</button>
+            </div>
         </header>
 
+        <!-- QUICK STUDY BAR -->
         <div class="quick-study-bar">
-            <div class="study-chip" onclick="quickStudyPrompt('Explain this concept using the Feynman Technique and real-life intuition:')">💡 Feynman Intuition</div>
-            <div class="study-chip" onclick="quickStudyPrompt('Generate 3 High-Yield NEET/JEE tricky MCQs on this topic with trap explanations:')">🎯 High-Yield MCQs</div>
-            <div class="study-chip" onclick="quickStudyPrompt('Identify the exact calculation/formula error in my attached problem step-by-step:')">🔍 Error Diagnostic</div>
+            <div class="study-chip" onclick="quickStudyPrompt('Explain this concept using the Feynman Technique and intuition:')">💡 Feynman Intuition</div>
+            <div class="study-chip" onclick="quickStudyPrompt('Generate 3 High-Yield tricky MCQs on this topic with trap explanations:')">🎯 High-Yield MCQs</div>
+            <div class="study-chip" onclick="quickStudyPrompt('Identify the exact calculation/formula error in my attached problem:')">🔍 Error Diagnostic</div>
             <div class="study-chip" onclick="quickStudyPrompt('Break down the high-yield NCERT points and common traps for this chapter:')">📖 NCERT Traps</div>
         </div>
 
         <main class="chat-container" id="chatStream">
             <div class="hero-greeting" id="heroGreeting">
                 <div class="hero-logo">🍋</div>
-                <div class="hero-title">Academic & NEET Engine Ready</div>
-                <div style="font-size:13.5px; color:#94a3b8; max-width:440px; margin-bottom:18px;">
-                    Snap questions with 📷 camera, upload PDF notes, or pose complex conceptual doubts.
+                <h2 style="font-family:'Space Grotesk'; font-size:22px; margin-bottom:8px;">Lemon Sovereign Core Ready</h2>
+                <div style="font-size:13.5px; color:var(--text-muted); line-height:1.5;">
+                    Pose complex conceptual doubts, snap question photos, upload notes, or switch to Deep Emotion mode.
                 </div>
             </div>
         </main>
 
         <footer class="bottom-dock">
-            <div class="dock-status" id="dockStatus">● Study Core Synchronized</div>
+            <div class="dock-status" id="dockStatus">● Lemon Core Synchronized</div>
             <div class="input-dock">
                 <button class="dock-btn cam-btn" onclick="requestCameraAccess()" title="Camera Scan">📷</button>
                 <label class="dock-btn doc-btn" style="cursor:pointer;" title="Upload PDF/Notes">
                     📄
                     <input type="file" id="docFileInput" accept=".pdf,.txt,.md" style="display:none;" onchange="handleDocFileUpload(event)">
                 </label>
-                <input type="text" id="textInput" placeholder="Pose a study doubt, derivation, or snap question..." onkeydown="if(event.key==='Enter') sendTextQuery()" />
+                <input type="text" id="textInput" placeholder="Pose a doubt, problem derivation, or question..." onkeydown="if(event.key==='Enter') sendTextQuery()" />
                 <button class="dock-btn mic-btn" id="micBtn" onclick="requestMicAndRecord()" title="Voice Dictation">🎙️</button>
                 <button class="dock-btn stop-btn" id="stopBtn" onclick="stopLemonSpeaking()" title="Stop Audio">⏹</button>
                 <button class="dock-btn send-btn" onclick="sendTextQuery()" title="Send">➤</button>
@@ -1147,6 +1174,7 @@ async def serve_app():
             let currentUserId = localStorage.getItem("lemon_user_id") || "1";
             let currentSessionId = parseInt(localStorage.getItem("lemon_current_session_id") || "0");
             let currentCoreMode = "study";
+            let currentAvatar = localStorage.getItem("lemon_user_avatar") || "⚡";
             let attachedImageBase64 = null;
             let cameraStream = null;
 
@@ -1158,7 +1186,21 @@ async def serve_app():
             const cameraModal = document.getElementById("cameraModal");
             const cameraVideo = document.getElementById("cameraVideo");
             const cameraCanvas = document.getElementById("cameraCanvas");
-            const sidebar = document.getElementById("sidebar");
+            const leftSidebar = document.getElementById("leftSidebar");
+            const rightSidebar = document.getElementById("rightSidebar");
+            const overlay = document.getElementById("overlay");
+            const avatarDisplayBtn = document.getElementById("avatarDisplayBtn");
+
+            avatarDisplayBtn.innerText = currentAvatar;
+
+            function selectAvatar(symbol, elem) {
+                currentAvatar = symbol;
+                localStorage.setItem("lemon_user_avatar", symbol);
+                avatarDisplayBtn.innerText = symbol;
+                document.querySelectorAll(".avatar-card").forEach(c => c.classList.remove("active"));
+                elem.classList.add("active");
+                document.getElementById("profileDisplay").innerText = `${symbol} Student (Local Session)`;
+            }
 
             function quickStudyPrompt(prefix) {
                 textInput.value = prefix + " ";
@@ -1195,7 +1237,7 @@ async def serve_app():
                 }
 
                 if (!streamActive) {
-                    alert("Camera access denied or unavailable. You can upload an image file directly.");
+                    alert("Camera access denied or unavailable. Opening file selector directly.");
                     closeCamera();
                     document.getElementById("fileUploadInput").click();
                 }
@@ -1217,7 +1259,7 @@ async def serve_app():
                 cameraCanvas.getContext("2d").drawImage(cameraVideo, 0, 0);
                 attachedImageBase64 = cameraCanvas.toDataURL("image/jpeg", 0.85);
                 closeCamera();
-                dockStatus.innerText = "● Image captured. Enter query or press ➤ to audit.";
+                dockStatus.innerText = "● Image captured. Press ➤ to audit.";
             }
 
             function handleFileUpload(e) {
@@ -1227,7 +1269,7 @@ async def serve_app():
                 r.onload = (ev) => {
                     attachedImageBase64 = ev.target.result;
                     closeCamera();
-                    dockStatus.innerText = "● Problem photo loaded. Press ➤ to analyze.";
+                    dockStatus.innerText = "● Problem photo loaded. Press ➤ to audit.";
                 };
                 r.readAsDataURL(file);
             }
@@ -1235,14 +1277,14 @@ async def serve_app():
             async function handleDocFileUpload(e) {
                 const file = e.target.files[0];
                 if (!file) return;
-                dockStatus.innerText = "● Parsing PDF/Document...";
+                dockStatus.innerText = "● Parsing document text...";
                 const fd = new FormData();
                 fd.append("file", file);
                 try {
                     const res = await fetch("/api/parse-doc", { method: "POST", body: fd });
                     const d = await res.json();
                     if (d.status === "ok") {
-                        textInput.value = `[Document: ${d.filename}]\n\n${d.text}\n\nTask: Synthesize high-yield study points and derivations.`;
+                        textInput.value = `[Document: ${d.filename}]\n\n${d.text}\n\nTask: Synthesize key derivations and high-yield insights.`;
                         dockStatus.innerText = "● Document ingested. Press ➤ to process.";
                     }
                 } catch(err) { dockStatus.innerText = "Upload failed."; }
@@ -1257,8 +1299,8 @@ async def serve_app():
                 attachedImageBase64 = null;
                 document.getElementById("heroGreeting").style.display = "none";
 
-                appendMessage("user", text ? text : "[Inspecting Study Artifact]", null, img);
-                dockStatus.innerText = "⚡ First-principles derivation in progress...";
+                appendMessage("user", text ? text : "[Artifact Inspection Request]", null, img);
+                dockStatus.innerText = "⚡ First-principles synthesis in progress...";
 
                 const fd = new FormData();
                 fd.append("text", text ? text : "Examine this problem or diagram step-by-step.");
@@ -1286,7 +1328,7 @@ async def serve_app():
                 const grp = document.createElement("div");
                 grp.className = `bubble-group ${sender}`;
                 let imgTag = img ? `<img src="${img}" class="chat-img-thumb">` : "";
-                let emoTag = emotion ? `<span style="font-size:10px; font-weight:800; color:#facc15; text-transform:uppercase;">● ${emotion}</span><br>` : "";
+                let emoTag = emotion ? `<span style="font-size:10px; font-weight:800; color:var(--gold); text-transform:uppercase;">● ${emotion}</span><br>` : "";
 
                 grp.innerHTML = `
                     <div class="bubble ${sender}">
@@ -1299,16 +1341,25 @@ async def serve_app():
                 chatStream.scrollTop = chatStream.scrollHeight;
             }
 
-            function openSidebar() { sidebar.classList.add("open"); }
-            function closeSidebar() { sidebar.classList.remove("open"); }
+            function openLeftSidebar() { leftSidebar.classList.add("open"); overlay.classList.add("open"); }
+            function openRightSidebar() { rightSidebar.classList.add("open"); overlay.classList.add("open"); }
+            function closeAllSidebars() { leftSidebar.classList.remove("open"); rightSidebar.classList.remove("open"); overlay.classList.remove("open"); }
 
             function switchDedicatedChamber(mode) {
                 currentCoreMode = mode;
                 document.querySelectorAll(".core-choice").forEach(b => b.classList.remove("selected"));
                 const target = document.getElementById(`core-${mode}`);
                 if (target) target.classList.add("selected");
-                document.getElementById("currentChamberBadge").innerText = `⚡ ${mode.toUpperCase()} CHAIR`;
-                closeSidebar();
+                
+                const labels = {
+                    study: "📚 Socratic Study", solver: "🧠 Step Solver", recall: "🎯 Active Recall",
+                    emotion: "💖 Deep Emotion", intellect: "⚡ Deep Intellect", rage: "🔥 Rage Rigor",
+                    strategy: "♟️ Strategist", philosophy: "🏛️ Philosophy", creative: "🎨 Creative", zen: "🌿 Zen Somatic"
+                };
+                const label = labels[mode] || mode.toUpperCase();
+                document.getElementById("currentChamberBadge").innerText = label;
+                document.getElementById("settingsActiveMode").innerText = label;
+                closeAllSidebars();
             }
         </script>
     </body>
