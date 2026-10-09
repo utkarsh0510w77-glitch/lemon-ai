@@ -12,6 +12,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from groq import Groq
 from gtts import gTTS
 
+try:
+    import psycopg2
+    import psycopg2.extras
+    POSTGRES_AVAILABLE = True
+except ImportError:
+    POSTGRES_AVAILABLE = False
+
 # GitHub Scanner safe bypass key
 PART1 = "gsk_HFaYhV1dR0lldEmL2zkAWGdy"
 PART2 = "b3FYnQHV93Lkgjmz4CtDJ1IpMfy4"
@@ -21,7 +28,13 @@ client = Groq(api_key=GROQ_API_KEY)
 
 OWNER_USERNAME = "utkarsh"
 
-app = FastAPI(title="Lemon AI - Sovereign Command & Visual Bug Reporting")
+# Render Persistent Cloud PostgreSQL Database URL
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql://lemon_db_7jr5_user:fCnr4Ag4rcayvFbgZcxeRW02ROKFnm8A@dpg-db4e0i3l550s73besfpg-a.oregon-postgres.render.com/lemon_db_7jr5"
+)
+
+app = FastAPI(title="Lemon AI - Persistent Cloud Database Edition")
 
 app.add_middleware(
     CORSMiddleware,
@@ -31,76 +44,137 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-DB_PATH = "lemon_data.db"
-
-def get_db():
-    conn = sqlite3.connect(DB_PATH, timeout=25)
-    conn.execute("PRAGMA journal_mode=WAL;")
-    return conn
+# ----------------- DUAL DATABASE ENGINE (POSTGRESQL + SQLITE FALLBACK) -----------------
+class DBManager:
+    @staticmethod
+    def get_conn():
+        if POSTGRES_AVAILABLE and DATABASE_URL:
+            try:
+                # Render external/internal Postgres URL handling
+                url = DATABASE_URL
+                if url.startswith("postgres://"):
+                    url = url.replace("postgres://", "postgresql://", 1)
+                conn = psycopg2.connect(url, sslmode="require")
+                return conn, "postgres"
+            except Exception as e:
+                print(f"[DB] PostgreSQL connection failed, falling back to SQLite: {e}")
+        
+        # SQLite Fallback
+        conn = sqlite3.connect("lemon_data.db", timeout=25)
+        conn.execute("PRAGMA journal_mode=WAL;")
+        return conn, "sqlite"
 
 def init_db():
-    conn = get_db()
+    conn, engine = DBManager.get_conn()
     cur = conn.cursor()
     try:
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT UNIQUE NOT NULL,
-                password_hash TEXT NOT NULL,
-                role TEXT NOT NULL DEFAULT 'user',
-                last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS site_stats (
-                key TEXT PRIMARY KEY,
-                value INTEGER DEFAULT 0
-            )
-        """)
-        cur.execute("""
-            INSERT OR IGNORE INTO site_stats (key, value) VALUES ('total_visits', 0)
-        """)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS sessions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                title TEXT NOT NULL,
-                core_mode TEXT NOT NULL DEFAULT 'intellect',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY(user_id) REFERENCES users(id)
-            )
-        """)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id INTEGER NOT NULL,
-                role TEXT NOT NULL,
-                content TEXT NOT NULL,
-                mode TEXT NOT NULL,
-                emotion TEXT,
-                image_data TEXT,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY(session_id) REFERENCES sessions(id)
-            )
-        """)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS complaints (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                username TEXT NOT NULL,
-                category TEXT NOT NULL,
-                message TEXT NOT NULL,
-                image_proof TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY(user_id) REFERENCES users(id)
-            )
-        """)
-        # Safe schema migration for complaints image_proof if table exists from previous build
-        try:
-            cur.execute("ALTER TABLE complaints ADD COLUMN image_proof TEXT")
-        except sqlite3.OperationalError:
-            pass
+        if engine == "postgres":
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id SERIAL PRIMARY KEY,
+                    username VARCHAR(255) UNIQUE NOT NULL,
+                    password_hash VARCHAR(255) NOT NULL,
+                    role VARCHAR(50) DEFAULT 'user',
+                    last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS site_stats (
+                    key VARCHAR(100) PRIMARY KEY,
+                    value BIGINT DEFAULT 0
+                );
+            """)
+            cur.execute("""
+                INSERT INTO site_stats (key, value) 
+                VALUES ('total_visits', 0) 
+                ON CONFLICT (key) DO NOTHING;
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS sessions (
+                    id SERIAL PRIMARY KEY,
+                    user_id INT NOT NULL,
+                    title VARCHAR(255) NOT NULL,
+                    core_mode VARCHAR(50) DEFAULT 'intellect',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+                );
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS messages (
+                    id SERIAL PRIMARY KEY,
+                    session_id INT NOT NULL,
+                    role VARCHAR(50) NOT NULL,
+                    content TEXT NOT NULL,
+                    mode VARCHAR(50) NOT NULL,
+                    emotion VARCHAR(100),
+                    image_data TEXT,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+                );
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS complaints (
+                    id SERIAL PRIMARY KEY,
+                    user_id INT NOT NULL,
+                    username VARCHAR(255) NOT NULL,
+                    category VARCHAR(100) NOT NULL,
+                    message TEXT NOT NULL,
+                    image_proof TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+        else:
+            # SQLite Tables
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    role TEXT NOT NULL DEFAULT 'user',
+                    last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS site_stats (
+                    key TEXT PRIMARY KEY,
+                    value INTEGER DEFAULT 0
+                )
+            """)
+            cur.execute("INSERT OR IGNORE INTO site_stats (key, value) VALUES ('total_visits', 0)")
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS sessions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    title TEXT NOT NULL,
+                    core_mode TEXT NOT NULL DEFAULT 'intellect',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id INTEGER NOT NULL,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    mode TEXT NOT NULL,
+                    emotion TEXT,
+                    image_data TEXT,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS complaints (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    username TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    image_proof TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
         conn.commit()
     finally:
         conn.close()
@@ -112,22 +186,26 @@ def hash_password(password: str) -> str:
     return hashlib.sha256((password + salt).encode('utf-8')).hexdigest()
 
 def record_visit():
-    conn = get_db()
+    conn, engine = DBManager.get_conn()
     cur = conn.cursor()
     try:
         cur.execute("UPDATE site_stats SET value = value + 1 WHERE key = 'total_visits'")
         conn.commit()
+    except Exception as e:
+        print("Visit record error:", e)
     finally:
         conn.close()
 
 def update_user_heartbeat(user_id: int):
     if not user_id or user_id <= 0:
         return
-    conn = get_db()
+    conn, engine = DBManager.get_conn()
     cur = conn.cursor()
     try:
-        cur.execute("UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE id = ?", (user_id,))
+        cur.execute("UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE id = %s" if engine == "postgres" else "UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE id = ?", (user_id,))
         conn.commit()
+    except Exception as e:
+        print("Heartbeat error:", e)
     finally:
         conn.close()
 
@@ -250,24 +328,38 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
             continue
     return "Cognitive process briefly desynchronized. Articulate your query again.", "Serene"
 
-# ----------------- AUTH ENDPOINTS -----------------
+# ----------------- AUTH APIS (POSTGRES COMPATIBLE) -----------------
 @app.post("/api/register")
 def register_user(username: str = Form(...), password: str = Form(...)):
     username = username.strip().lower()
     if not username or len(password) < 3:
         return JSONResponse({"status": "error", "message": "Username and password (min 3 chars) required."}, status_code=400)
 
-    conn = get_db()
+    conn, engine = DBManager.get_conn()
     cur = conn.cursor()
     try:
         pwd_hash = hash_password(password)
         user_role = "owner" if username == OWNER_USERNAME.lower() else "user"
-        cur.execute("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)", (username, pwd_hash, user_role))
+        
+        if engine == "postgres":
+            cur.execute(
+                "INSERT INTO users (username, password_hash, role) VALUES (%s, %s, %s) RETURNING id",
+                (username, pwd_hash, user_role)
+            )
+            user_id = cur.fetchone()[0]
+        else:
+            cur.execute(
+                "INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
+                (username, pwd_hash, user_role)
+            )
+            user_id = cur.lastrowid
+
         conn.commit()
-        user_id = cur.lastrowid
         return JSONResponse({"status": "ok", "user_id": user_id, "username": username, "role": user_role})
-    except sqlite3.IntegrityError:
-        return JSONResponse({"status": "error", "message": "Username already exists. Select Sign In."}, status_code=400)
+    except Exception as e:
+        if "unique" in str(e).lower() or "IntegrityError" in str(e):
+            return JSONResponse({"status": "error", "message": "Username already exists. Select Sign In."}, status_code=400)
+        return JSONResponse({"status": "error", "message": f"Database error: {str(e)}"}, status_code=500)
     finally:
         conn.close()
 
@@ -276,19 +368,21 @@ def login_user(username: str = Form(...), password: str = Form(...)):
     username = username.strip().lower()
     pwd_hash = hash_password(password)
 
-    conn = get_db()
+    conn, engine = DBManager.get_conn()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT id, username, role FROM users WHERE username = ? AND password_hash = ?", (username, pwd_hash))
+        sql = "SELECT id, username, role FROM users WHERE username = %s AND password_hash = %s" if engine == "postgres" else "SELECT id, username, role FROM users WHERE username = ? AND password_hash = ?"
+        cur.execute(sql, (username, pwd_hash))
         user = cur.fetchone()
         if user:
-            # Auto-promote to owner if username is utkarsh
             user_role = "owner" if username == OWNER_USERNAME.lower() else user[2]
-            cur.execute("UPDATE users SET last_active = CURRENT_TIMESTAMP, role = ? WHERE id = ?", (user_role, user[0]))
+            upd_sql = "UPDATE users SET last_active = CURRENT_TIMESTAMP, role = %s WHERE id = %s" if engine == "postgres" else "UPDATE users SET last_active = CURRENT_TIMESTAMP, role = ? WHERE id = ?"
+            cur.execute(upd_sql, (user_role, user[0]))
             conn.commit()
             return JSONResponse({"status": "ok", "user_id": user[0], "username": user[1], "role": user_role})
         
-        cur.execute("SELECT id FROM users WHERE username = ?", (username,))
+        check_sql = "SELECT id FROM users WHERE username = %s" if engine == "postgres" else "SELECT id FROM users WHERE username = ?"
+        cur.execute(check_sql, (username,))
         if not cur.fetchone():
             return JSONResponse({"status": "not_found", "message": "Account not registered. Switch to 'Create Account'."}, status_code=404)
         return JSONResponse({"status": "error", "message": "Credentials mismatch. Verify password."}, status_code=401)
@@ -302,53 +396,60 @@ def heartbeat(user_id: int = Form(...)):
 
 @app.get("/api/sessions/{user_id}")
 def get_user_sessions(user_id: int):
-    conn = get_db()
+    conn, engine = DBManager.get_conn()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT id, title, core_mode, created_at FROM sessions WHERE user_id = ? ORDER BY id DESC", (user_id,))
+        sql = "SELECT id, title, core_mode, created_at FROM sessions WHERE user_id = %s ORDER BY id DESC" if engine == "postgres" else "SELECT id, title, core_mode, created_at FROM sessions WHERE user_id = ? ORDER BY id DESC"
+        cur.execute(sql, (user_id,))
         rows = cur.fetchall()
-        return JSONResponse({"sessions": [{"id": r[0], "title": r[1], "core_mode": r[2], "created_at": r[3]} for r in rows]})
+        return JSONResponse({"sessions": [{"id": r[0], "title": r[1], "core_mode": r[2], "created_at": str(r[3])} for r in rows]})
     finally:
         conn.close()
 
 @app.get("/api/session-messages/{session_id}")
 def get_session_messages(session_id: int):
-    conn = get_db()
+    conn, engine = DBManager.get_conn()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT role, content, mode, emotion, image_data, timestamp FROM messages WHERE session_id = ? ORDER BY id ASC", (session_id,))
+        sql = "SELECT role, content, mode, emotion, image_data, timestamp FROM messages WHERE session_id = %s ORDER BY id ASC" if engine == "postgres" else "SELECT role, content, mode, emotion, image_data, timestamp FROM messages WHERE session_id = ? ORDER BY id ASC"
+        cur.execute(sql, (session_id,))
         rows = cur.fetchall()
-        messages = [{"role": r[0], "content": r[1], "mode": r[2], "emotion": r[3], "image_data": r[4], "timestamp": r[5]} for r in rows]
+        messages = [{"role": r[0], "content": r[1], "mode": r[2], "emotion": r[3], "image_data": r[4], "timestamp": str(r[5])} for r in rows]
         return JSONResponse({"messages": messages})
     finally:
         conn.close()
 
 @app.post("/api/new-core-session")
 def new_core_session(user_id: int = Form(...), core_mode: str = Form(...)):
-    conn = get_db()
+    conn, engine = DBManager.get_conn()
     cur = conn.cursor()
     try:
         title = f"{core_mode.capitalize()} Chamber"
-        cur.execute("INSERT INTO sessions (user_id, title, core_mode) VALUES (?, ?, ?)", (user_id, title, core_mode))
+        if engine == "postgres":
+            cur.execute("INSERT INTO sessions (user_id, title, core_mode) VALUES (%s, %s, %s) RETURNING id", (user_id, title, core_mode))
+            session_id = cur.fetchone()[0]
+        else:
+            cur.execute("INSERT INTO sessions (user_id, title, core_mode) VALUES (?, ?, ?)", (user_id, title, core_mode))
+            session_id = cur.lastrowid
         conn.commit()
-        session_id = cur.lastrowid
         return JSONResponse({"status": "ok", "session_id": session_id, "title": title, "core_mode": core_mode})
     finally:
         conn.close()
 
 @app.post("/api/delete-session")
 def delete_session(session_id: int = Form(...)):
-    conn = get_db()
+    conn, engine = DBManager.get_conn()
     cur = conn.cursor()
     try:
-        cur.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
-        cur.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+        sql_m = "DELETE FROM messages WHERE session_id = %s" if engine == "postgres" else "DELETE FROM messages WHERE session_id = ?"
+        sql_s = "DELETE FROM sessions WHERE id = %s" if engine == "postgres" else "DELETE FROM sessions WHERE id = ?"
+        cur.execute(sql_m, (session_id,))
+        cur.execute(sql_s, (session_id,))
         conn.commit()
         return JSONResponse({"status": "ok"})
     finally:
         conn.close()
 
-# ----------------- COMPLAINTS / FEEDBACK WITH PHOTO -----------------
 @app.post("/api/complaints/submit")
 def submit_complaint(
     user_id: int = Form(...),
@@ -363,61 +464,61 @@ def submit_complaint(
 
     img_data = image_proof if (image_proof and len(image_proof.strip()) > 50) else None
 
-    conn = get_db()
+    conn, engine = DBManager.get_conn()
     cur = conn.cursor()
     try:
-        cur.execute(
-            "INSERT INTO complaints (user_id, username, category, message, image_proof) VALUES (?, ?, ?, ?, ?)",
-            (user_id, username, category, msg, img_data)
-        )
+        sql = "INSERT INTO complaints (user_id, username, category, message, image_proof) VALUES (%s, %s, %s, %s, %s)" if engine == "postgres" else "INSERT INTO complaints (user_id, username, category, message, image_proof) VALUES (?, ?, ?, ?, ?)"
+        cur.execute(sql, (user_id, username, category, msg, img_data))
         conn.commit()
-        return JSONResponse({"status": "ok", "message": "Feedback submitted successfully with visual artifact."})
+        return JSONResponse({"status": "ok", "message": "Feedback submitted successfully."})
     finally:
         conn.close()
 
-# ----------------- BULLETPROOF OWNER TELEMETRY API -----------------
+# ----------------- RELIABLE OWNER TELEMETRY API -----------------
 @app.get("/api/owner/telemetry")
 def get_owner_telemetry(user_id: int = 0, username: str = ""):
-    conn = get_db()
+    conn, engine = DBManager.get_conn()
     cur = conn.cursor()
     try:
         is_owner = False
 
-        # 1. Primary Check by User ID
         if user_id and user_id > 0:
-            cur.execute("SELECT id, username, role FROM users WHERE id = ?", (user_id,))
+            sql = "SELECT id, username, role FROM users WHERE id = %s" if engine == "postgres" else "SELECT id, username, role FROM users WHERE id = ?"
+            cur.execute(sql, (user_id,))
             row = cur.fetchone()
             if row:
                 if row[1].lower() == OWNER_USERNAME.lower() or row[2] == "owner":
                     is_owner = True
                     if row[2] != "owner":
-                        cur.execute("UPDATE users SET role = 'owner' WHERE id = ?", (row[0],))
+                        up_sql = "UPDATE users SET role = 'owner' WHERE id = %s" if engine == "postgres" else "UPDATE users SET role = 'owner' WHERE id = ?"
+                        cur.execute(up_sql, (row[0],))
                         conn.commit()
 
-        # 2. Secondary Safe Fallback Check by Username
         if not is_owner and username:
             if username.strip().lower() == OWNER_USERNAME.lower():
-                cur.execute("SELECT id FROM users WHERE lower(username) = ?", (OWNER_USERNAME.lower(),))
+                sql = "SELECT id FROM users WHERE lower(username) = %s" if engine == "postgres" else "SELECT id FROM users WHERE lower(username) = ?"
+                cur.execute(sql, (OWNER_USERNAME.lower(),))
                 u_row = cur.fetchone()
                 if u_row:
-                    cur.execute("UPDATE users SET role = 'owner' WHERE id = ?", (u_row[0],))
+                    up_sql = "UPDATE users SET role = 'owner' WHERE id = %s" if engine == "postgres" else "UPDATE users SET role = 'owner' WHERE id = ?"
+                    cur.execute(up_sql, (u_row[0],))
                     conn.commit()
                 is_owner = True
 
         if not is_owner:
             return JSONResponse({"status": "error", "message": "Unauthorized access to Sovereign Telemetry."}, status_code=403)
 
-        # Total Visits
         cur.execute("SELECT value FROM site_stats WHERE key = 'total_visits'")
         v_row = cur.fetchone()
         total_visits = v_row[0] if v_row else 0
 
-        # Registered Users
         cur.execute("SELECT id, username, role, last_active, created_at FROM users ORDER BY id DESC")
         users_raw = cur.fetchall()
 
-        # Online Users (active in last 10 mins)
-        cur.execute("SELECT COUNT(*) FROM users WHERE datetime(last_active) >= datetime('now', '-10 minutes')")
+        if engine == "postgres":
+            cur.execute("SELECT COUNT(*) FROM users WHERE last_active >= NOW() - INTERVAL '10 minutes'")
+        else:
+            cur.execute("SELECT COUNT(*) FROM users WHERE datetime(last_active) >= datetime('now', '-10 minutes')")
         online_count = cur.fetchone()[0]
 
         users_list = []
@@ -426,11 +527,10 @@ def get_owner_telemetry(user_id: int = 0, username: str = ""):
                 "id": u[0],
                 "username": u[1],
                 "role": u[2],
-                "last_active": u[3],
-                "created_at": u[4]
+                "last_active": str(u[3]),
+                "created_at": str(u[4])
             })
 
-        # Complaints with Image Proof
         cur.execute("SELECT id, username, category, message, image_proof, created_at FROM complaints ORDER BY id DESC")
         complaints_list = [
             {
@@ -439,12 +539,11 @@ def get_owner_telemetry(user_id: int = 0, username: str = ""):
                 "category": r[2],
                 "message": r[3],
                 "image_proof": r[4],
-                "created_at": r[5]
+                "created_at": str(r[5])
             }
             for r in cur.fetchall()
         ]
 
-        # Core Mode Distribution
         cur.execute("SELECT core_mode, COUNT(*) FROM sessions GROUP BY core_mode")
         core_dist = {r[0]: r[1] for r in cur.fetchall()}
 
@@ -456,6 +555,7 @@ def get_owner_telemetry(user_id: int = 0, username: str = ""):
 
         return JSONResponse({
             "status": "ok",
+            "database_engine": engine,
             "total_visits": total_visits,
             "total_users": len(users_list),
             "online_users": online_count,
@@ -480,31 +580,45 @@ def detect_tts_language(text: str) -> str:
 
 def handle_conversation(user_id: int, session_id: int, query: str, mode: str, image_base64: str = None):
     update_user_heartbeat(user_id)
-    conn = get_db()
+    conn, engine = DBManager.get_conn()
     cur = conn.cursor()
 
     try:
-        cur.execute("SELECT id FROM users WHERE id = ?", (user_id,))
+        user_check = "SELECT id FROM users WHERE id = %s" if engine == "postgres" else "SELECT id FROM users WHERE id = ?"
+        cur.execute(user_check, (user_id,))
         if not cur.fetchone():
-            cur.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)", (f"user_{user_id}", "guest_pwd"))
+            if engine == "postgres":
+                cur.execute("INSERT INTO users (username, password_hash) VALUES (%s, %s) RETURNING id", (f"user_{user_id}", "guest_pwd"))
+                user_id = cur.fetchone()[0]
+            else:
+                cur.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)", (f"user_{user_id}", "guest_pwd"))
+                user_id = cur.lastrowid
             conn.commit()
-            user_id = cur.lastrowid
 
         if not session_id or session_id <= 0:
             title = generate_ai_title(query if query else "Image Analysis", mode)
-            cur.execute("INSERT INTO sessions (user_id, title, core_mode) VALUES (?, ?, ?)", (user_id, title, mode))
+            if engine == "postgres":
+                cur.execute("INSERT INTO sessions (user_id, title, core_mode) VALUES (%s, %s, %s) RETURNING id", (user_id, title, mode))
+                session_id = cur.fetchone()[0]
+            else:
+                cur.execute("INSERT INTO sessions (user_id, title, core_mode) VALUES (?, ?, ?)", (user_id, title, mode))
+                session_id = cur.lastrowid
             conn.commit()
-            session_id = cur.lastrowid
         else:
-            cur.execute("SELECT title, core_mode FROM sessions WHERE id = ?", (session_id,))
+            s_check = "SELECT title, core_mode FROM sessions WHERE id = %s" if engine == "postgres" else "SELECT title, core_mode FROM sessions WHERE id = ?"
+            cur.execute(s_check, (session_id,))
             row = cur.fetchone()
             if row:
                 title, mode = row[0], row[1]
             else:
                 title = generate_ai_title(query if query else "Image Analysis", mode)
-                cur.execute("INSERT INTO sessions (user_id, title, core_mode) VALUES (?, ?, ?)", (user_id, title, mode))
+                if engine == "postgres":
+                    cur.execute("INSERT INTO sessions (user_id, title, core_mode) VALUES (%s, %s, %s) RETURNING id", (user_id, title, mode))
+                    session_id = cur.fetchone()[0]
+                else:
+                    cur.execute("INSERT INTO sessions (user_id, title, core_mode) VALUES (?, ?, ?)", (user_id, title, mode))
+                    session_id = cur.lastrowid
                 conn.commit()
-                session_id = cur.lastrowid
 
         clean = query.lower().strip() if query else ""
         creator_triggers = ["who made you", "who created you", "who is your creator", "maker", "developer", "kisne banaya", "utkarsh"]
@@ -512,13 +626,17 @@ def handle_conversation(user_id: int, session_id: int, query: str, mode: str, im
             reply = "I was engineered by Utkarsh Bandhu. He conceptualized and developed my cognitive architecture, instilling both my intellectual rigor and analytical capacity."
             emotion = "Brilliant"
         else:
-            cur.execute("SELECT role, content FROM messages WHERE session_id = ? ORDER BY id DESC LIMIT 8", (session_id,))
+            h_sql = "SELECT role, content FROM messages WHERE session_id = %s ORDER BY id DESC LIMIT 8" if engine == "postgres" else "SELECT role, content FROM messages WHERE session_id = ? ORDER BY id DESC LIMIT 8"
+            cur.execute(h_sql, (session_id,))
             past_rows = cur.fetchall()
             history = [{"role": r[0], "content": r[1]} for r in reversed(past_rows)]
             reply, emotion = ask_groq_vision_or_llm(query, mode, history, image_base64)
 
-        cur.execute("INSERT INTO messages (session_id, role, content, mode, image_data) VALUES (?, 'user', ?, ?, ?)", (session_id, query if query else "[Visual Data Transmitted]", mode, image_base64))
-        cur.execute("INSERT INTO messages (session_id, role, content, mode, emotion) VALUES (?, 'assistant', ?, ?, ?)", (session_id, reply, mode, emotion))
+        ins_m = "INSERT INTO messages (session_id, role, content, mode, image_data) VALUES (%s, %s, %s, %s, %s)" if engine == "postgres" else "INSERT INTO messages (session_id, role, content, mode, image_data) VALUES (?, ?, ?, ?, ?)"
+        cur.execute(ins_m, (session_id, 'user', query if query else "[Visual Data Transmitted]", mode, image_base64))
+        
+        ins_a = "INSERT INTO messages (session_id, role, content, mode, emotion) VALUES (%s, %s, %s, %s, %s)" if engine == "postgres" else "INSERT INTO messages (session_id, role, content, mode, emotion) VALUES (?, ?, ?, ?, ?)"
+        cur.execute(ins_a, (session_id, 'assistant', reply, mode, emotion))
         conn.commit()
     finally:
         conn.close()
@@ -626,7 +744,7 @@ async def serve_owner_dashboard():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Lemon AI | Sovereign Command Center</title>
+        <title>Lemon AI | Sovereign Command Center (Cloud Persistent)</title>
         <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
         <style>
             :root {
@@ -711,7 +829,6 @@ async def serve_owner_dashboard():
         </style>
     </head>
     <body>
-        <!-- OWNER GATEWAY MODAL (SHOWN ONLY IF UNAUTH) -->
         <div class="auth-modal" id="ownerGate">
             <div class="auth-box">
                 <div style="font-size:36px; margin-bottom:8px;">🛡️</div>
@@ -724,7 +841,6 @@ async def serve_owner_dashboard():
             </div>
         </div>
 
-        <!-- HEADER -->
         <header class="owner-nav">
             <div class="brand">
                 <div class="brand-badge">🍋</div>
@@ -734,23 +850,22 @@ async def serve_owner_dashboard():
                 </div>
             </div>
             <div style="display:flex; align-items:center; gap:14px;">
-                <div class="status-pill"><div class="dot-pulse"></div> Live Monitoring</div>
+                <div class="status-pill"><div class="dot-pulse"></div> Live PostgreSQL Cloud</div>
                 <button onclick="location.href='/'" style="background:rgba(255,255,255,0.08); border:1px solid var(--card-border); color:#fff; padding:6px 14px; border-radius:14px; font-size:12px; cursor:pointer;">← Return to App</button>
             </div>
         </header>
 
-        <!-- DASHBOARD CONTAINER -->
         <main class="container">
             <div class="metrics-grid">
                 <div class="metric-card">
                     <div class="metric-title">Total Website Visits</div>
                     <div class="metric-value" id="valVisits">0</div>
-                    <div class="metric-tag">● Persistent Hit Counter</div>
+                    <div class="metric-tag">● Persistent Cloud Counter</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-title">Registered Accounts</div>
                     <div class="metric-value" id="valUsers">0</div>
-                    <div class="metric-tag">● Verified User DB</div>
+                    <div class="metric-tag">● Safe in PostgreSQL</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-title">Live Active Users</div>
@@ -769,7 +884,6 @@ async def serve_owner_dashboard():
                 </div>
             </div>
 
-            <!-- Core Modes Distribution -->
             <div class="panel">
                 <div class="panel-header">
                     <div class="panel-title">⚡ Cognitive Chamber Usage Breakdown</div>
@@ -777,9 +891,7 @@ async def serve_owner_dashboard():
                 <div class="core-chip-grid" id="coreUsageGrid">Loading chamber stats...</div>
             </div>
 
-            <!-- Split Section: Users Table & Complaints with Photos -->
             <div class="sections-split">
-                <!-- User Registry -->
                 <div class="panel">
                     <div class="panel-header">
                         <div class="panel-title">👥 Registered Accounts Registry</div>
@@ -804,7 +916,6 @@ async def serve_owner_dashboard():
                     </div>
                 </div>
 
-                <!-- Complaints & Issue Feedback Queue -->
                 <div class="panel">
                     <div class="panel-header">
                         <div class="panel-title">🚨 Complaints & Bug Feed (With Photos)</div>
@@ -868,7 +979,6 @@ async def serve_owner_dashboard():
                     document.getElementById("valComplaints").innerText = d.complaints.length;
                     document.getElementById("valSessions").innerText = d.total_sessions;
 
-                    // Core Distribution
                     const coreBox = document.getElementById("coreUsageGrid");
                     const cores = d.core_distribution || {};
                     if (Object.keys(cores).length > 0) {
@@ -881,11 +991,9 @@ async def serve_owner_dashboard():
                         coreBox.innerHTML = "No chamber usage recorded yet.";
                     }
 
-                    // Render Users Table
                     fullUsersData = d.users || [];
                     renderUsersTable(fullUsersData);
 
-                    // Render Complaints with Photo Support
                     const cBox = document.getElementById("complaintsList");
                     if (d.complaints && d.complaints.length > 0) {
                         cBox.innerHTML = d.complaints.map(c => `
@@ -1013,7 +1121,6 @@ async def serve_app():
                 color: #fca5a5; font-size: 12.5px; padding: 8px 12px; border-radius: 10px; margin-bottom: 12px;
             }
 
-            /* Report Proof Preview */
             .proof-preview-bar {
                 display: none; align-items: center; justify-content: space-between; padding: 6px 12px;
                 background: rgba(30, 41, 59, 0.6); border: 1px solid rgba(250, 204, 21, 0.3); border-radius: 12px; margin-bottom: 12px;
@@ -1258,7 +1365,6 @@ async def serve_app():
                 </select>
                 <textarea id="feedbackMessage" class="styled-textarea" placeholder="Explain the trouble or issue in detail..."></textarea>
                 
-                <!-- Trouble Photo Preview Bar -->
                 <div class="proof-preview-bar" id="reportProofBar">
                     <div style="display:flex; align-items:center; gap:8px;">
                         <img id="reportProofThumb" src="" alt="trouble proof">
@@ -1267,7 +1373,6 @@ async def serve_app():
                     <span class="proof-remove" onclick="clearReportPhoto()">✕ Remove</span>
                 </div>
 
-                <!-- Attach Photo Button -->
                 <label class="action-submit-btn" style="display:flex; align-items:center; justify-content:center; gap:6px; background:rgba(255,255,255,0.08); color:#fde047; margin-bottom:12px; cursor:pointer; font-size:13px; padding:10px;">
                     <span>📷 Attach Photo of Trouble</span>
                     <input type="file" id="reportPhotoInput" accept="image/*" style="display:none;" onchange="handleReportPhotoUpload(event)">
@@ -1292,10 +1397,7 @@ async def serve_app():
                 <button class="sidebar-close" onclick="closeSidebar()">✕</button>
             </div>
 
-            <!-- Dedicated Owner Portal Button (Visible only to Utkarsh) -->
             <button class="owner-menu-btn" id="ownerMenuBtn" onclick="location.href='/owner'">🛡️ Open Owner Portal</button>
-
-            <!-- User Feedback Button -->
             <button class="feedback-menu-btn" onclick="openFeedbackModal()">💬 Report Issue / Feedback</button>
 
             <div class="sidebar-section-title">Launch Specific Chamber</div>
@@ -1321,7 +1423,6 @@ async def serve_app():
             </div>
         </aside>
 
-        <!-- Header -->
         <header class="header">
             <div class="header-left">
                 <button class="menu-trigger" onclick="openSidebar()" title="Chambers & History">☰</button>
@@ -1334,7 +1435,6 @@ async def serve_app():
             <div class="current-chamber-pill" id="currentChamberBadge">⚡ INTELLECT</div>
         </header>
 
-        <!-- Chat Stream -->
         <main class="chat-container" id="chatStream">
             <div class="hero-greeting" id="heroGreeting">
                 <div class="hero-logo">🍋</div>
@@ -1346,7 +1446,6 @@ async def serve_app():
             </div>
         </main>
 
-        <!-- Bottom Input Bar -->
         <footer class="bottom-dock">
             <div class="img-preview-bar" id="imgPreviewBar">
                 <img id="imgPreviewThumb" src="" alt="preview">
