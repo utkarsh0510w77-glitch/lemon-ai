@@ -134,8 +134,10 @@ def init_db():
                 CREATE TABLE IF NOT EXISTS messages (id SERIAL PRIMARY KEY, session_id INT NOT NULL, role VARCHAR(50) NOT NULL, content TEXT NOT NULL, mode VARCHAR(50) NOT NULL, emotion VARCHAR(100), image_data TEXT, timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
                 CREATE TABLE IF NOT EXISTS complaints (id SERIAL PRIMARY KEY, user_id INT NOT NULL, username VARCHAR(255) NOT NULL, category VARCHAR(100) NOT NULL, message TEXT NOT NULL, image_proof TEXT, status VARCHAR(50) DEFAULT 'Open', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
             """)
+            conn.commit()
         else:
-            cur.execute("""
+            # Fixed: Using executescript for multi-statement SQLite execution
+            cur.executescript("""
                 CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'user', avatar TEXT DEFAULT '⚡', last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
                 CREATE TABLE IF NOT EXISTS site_stats (key TEXT PRIMARY KEY, value INTEGER DEFAULT 0);
                 INSERT OR IGNORE INTO site_stats (key, value) VALUES ('total_visits', 0);
@@ -144,7 +146,7 @@ def init_db():
                 CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id INTEGER NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, mode TEXT NOT NULL, emotion TEXT, image_data TEXT, timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
                 CREATE TABLE IF NOT EXISTS complaints (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, username TEXT NOT NULL, category TEXT NOT NULL, message TEXT NOT NULL, image_proof TEXT, status TEXT DEFAULT 'Open', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
             """)
-        conn.commit()
+            conn.commit()
     finally:
         conn.close()
 
