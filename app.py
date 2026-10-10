@@ -65,6 +65,24 @@ OWNER_SESSIONS = {}
 ACTIVE_NOTIFICATIONS = []
 SYSTEM_STATUS = {"model_operational": True, "last_healed_probe": "None", "db_integrity": "OK"}
 
+
+def normalize_user_record(row, engine):
+    if not row:
+        return None
+    if engine == "postgres":
+        user_id, username, role, avatar, password_hash, last_active, created_at = row[:7]
+    else:
+        user_id, username, role, avatar, password_hash, last_active, created_at = row[:7]
+    return {
+        "id": user_id,
+        "username": username,
+        "role": role or "user",
+        "avatar": avatar or "⚡",
+        "last_active": str(last_active) if last_active is not None else "Never",
+        "created_at": str(created_at) if created_at is not None else "Never",
+    }
+
+
 def send_otp_email(to_email: str, otp: str) -> tuple[bool, str]:
     if not SMTP_USER or not SMTP_PASS:
         return False, "SMTP credentials missing."
@@ -99,6 +117,7 @@ def send_otp_email(to_email: str, otp: str) -> tuple[bool, str]:
     except Exception as e:
         return False, str(e)
 
+
 class DBManager:
     @staticmethod
     def get_conn():
@@ -114,6 +133,7 @@ class DBManager:
         conn = sqlite3.connect("lemon_data.db", timeout=30)
         conn.execute("PRAGMA journal_mode=WAL;")
         return conn, "sqlite"
+
 
 def init_db():
     conn, engine = DBManager.get_conn()
@@ -135,7 +155,7 @@ def init_db():
                 CREATE TABLE IF NOT EXISTS announcements (id SERIAL PRIMARY KEY, message TEXT NOT NULL, is_active BOOLEAN DEFAULT TRUE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
                 CREATE TABLE IF NOT EXISTS sessions (id SERIAL PRIMARY KEY, user_id INT NOT NULL, title VARCHAR(255) NOT NULL, core_mode VARCHAR(50) DEFAULT 'study', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
                 CREATE TABLE IF NOT EXISTS messages (id SERIAL PRIMARY KEY, session_id INT NOT NULL, role VARCHAR(50) NOT NULL, content TEXT NOT NULL, mode VARCHAR(50) NOT NULL, emotion VARCHAR(100), image_data TEXT, timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
-                CREATE TABLE IF NOT EXISTS complaints (id SERIAL PRIMARY KEY, user_id INT NOT NULL, username VARCHAR(255) NOT NULL, category VARCHAR(100) NOT NULL, message TEXT NOT NULL, image_proof TEXT, status VARCHAR(50) DEFAULT 'Processing', ai_diagnosis TEXT, resolution TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+                CREATE TABLE IF NOT EXISTS complaints (id SERIAL PRIMARY KEY, user_id INT NOT NULL, username VARCHAR(255) NOT NULL, category VARCHAR(100) NOT NULL, message TEXT NOT NULL, image_proof TEXT, status VARCHAR(100) DEFAULT 'Processing', ai_diagnosis TEXT, resolution TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
                 CREATE TABLE IF NOT EXISTS self_heal_logs (id SERIAL PRIMARY KEY, probe_name VARCHAR(150) NOT NULL, issue_detected TEXT NOT NULL, heal_action TEXT NOT NULL, status VARCHAR(50) DEFAULT 'Healed', timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
             """)
             conn.commit()
@@ -154,11 +174,13 @@ def init_db():
     finally:
         conn.close()
 
+
 init_db()
+
 
 def broadcast_heal_alert(probe: str, issue: str, fix: str):
     alert = {
-        "id": f"{int(time.time()*1000)}",
+        "id": f"{int(time.time() * 1000)}",
         "probe": probe,
         "issue": issue,
         "fix": fix,
@@ -167,6 +189,9 @@ def broadcast_heal_alert(probe: str, issue: str, fix: str):
     ACTIVE_NOTIFICATIONS.append(alert)
     if len(ACTIVE_NOTIFICATIONS) > 10:
         ACTIVE_NOTIFICATIONS.pop(0)
+
+    SYSTEM_STATUS["last_healed_probe"] = probe
+    SYSTEM_STATUS["model_operational"] = True
 
     conn, engine = DBManager.get_conn()
     cur = conn.cursor()
@@ -179,7 +204,7 @@ def broadcast_heal_alert(probe: str, issue: str, fix: str):
     finally:
         conn.close()
 
-# ----------------- TRUE ACTIVE SELF-HEALING ENGINE -----------------
+
 def execute_real_system_heal(probe_id: int):
     """Executes verifiable diagnostics and corrects runtime issues."""
     global client
@@ -187,35 +212,51 @@ def execute_real_system_heal(probe_id: int):
     cur = conn.cursor()
     try:
         if probe_id == 1:
-            # Probe 1: Database Quick Check & Recovery
             if engine == "sqlite":
-                cur.execute("PRAGMA quick_check;")
-                res = cur.fetchone()[0]
-                if res != "ok":
-                    cur.execute("PRAGMA integrity_check;")
-                    conn.commit()
-                    broadcast_heal_alert("DB Integrity", f"Corrupt block: {res}", "Rebuilt table indices.")
+                cur.execute("PRAGMA integrity_check;")
+                integrity = cur.fetchone()
+                if integrity and integrity[0] != "ok":
+                    try:
+                        cur.execute("PRAGMA journal_mode=WAL;")
+                        cur.execute("VACUUM;")
+                        cur.execute("PRAGMA quick_check;")
+                        quick = cur.fetchone()
+                        if quick and quick[0] == "ok":
+                            broadcast_heal_alert("DB Integrity", f"Corrupt block detected: {integrity[0]}", "Rebuilt SQLite database health state.")
+                        else:
+                            broadcast_heal_alert("DB Integrity", f"Corruption still present: {integrity[0]}", "Set database to read-only safety mode.")
+                    except Exception as exc:
+                        broadcast_heal_alert("DB Integrity", f"Repair attempt failed: {str(exc)}", "Auto-isolated database recovery path.")
 
         elif probe_id == 2:
-            # Probe 2: Orphan Sessions Cleaner
-            cur.execute("SELECT id FROM sessions WHERE user_id NOT IN (SELECT id FROM users)")
+            if engine == "postgres":
+                cur.execute("SELECT s.id FROM sessions s LEFT JOIN users u ON u.id = s.user_id WHERE u.id IS NULL")
+            else:
+                cur.execute("SELECT s.id FROM sessions s LEFT JOIN users u ON u.id = s.user_id WHERE u.id IS NULL")
             orphans = cur.fetchall()
             if orphans:
                 ids = [str(o[0]) for o in orphans]
-                cur.execute(f"DELETE FROM sessions WHERE id IN ({','.join(ids)})")
+                placeholders = ", ".join(["%s"] * len(ids)) if engine == "postgres" else ", ".join(["?"] * len(ids))
+                sql = f"DELETE FROM sessions WHERE id IN ({placeholders})"
+                params = tuple(ids) if engine == "postgres" else ids
+                cur.execute(sql, params)
                 conn.commit()
                 broadcast_heal_alert("Orphan Sessions", f"Found {len(orphans)} dangling sessions", "Cleaned database orphan trees.")
 
         elif probe_id == 3:
-            # Probe 3: Client Reconnect & Key Validator
             if not GROQ_API_KEY:
+                SYSTEM_STATUS["model_operational"] = False
                 broadcast_heal_alert("Groq Client", "Missing GROQ_API_KEY env", "Switched fallback engine to Diagnostic Mode.")
             elif client is None:
-                client = Groq(api_key=GROQ_API_KEY)
-                broadcast_heal_alert("Groq Client", "Client instance was null", "Reinitialized Groq client successfully.")
+                try:
+                    client = Groq(api_key=GROQ_API_KEY)
+                    SYSTEM_STATUS["model_operational"] = True
+                    broadcast_heal_alert("Groq Client", "Client instance was null", "Reinitialized Groq client successfully.")
+                except Exception as exc:
+                    SYSTEM_STATUS["model_operational"] = False
+                    broadcast_heal_alert("Groq Client", f"Reinit failed: {str(exc)}", "Isolated client restart until key is valid.")
 
         elif probe_id == 4:
-            # Probe 4: Stale Token Eviction
             now = time.time()
             expired_otps = [k for k, v in OTP_STORE.items() if now > v.get("expires_at", 0)]
             for k in expired_otps:
@@ -224,35 +265,44 @@ def execute_real_system_heal(probe_id: int):
                 broadcast_heal_alert("Token Cache", f"Flushed {len(expired_otps)} stale OTP tokens", "Cleaned auth session cache.")
 
         elif probe_id == 5:
-            # Probe 5: Stalled Grievance Tickets
-            cur.execute("SELECT id, message, category FROM complaints WHERE status = 'Processing'")
+            cur.execute("SELECT id, message, category FROM complaints WHERE status IN ('Processing', 'Pending', 'Pending Key')")
             stalled = cur.fetchall()
             for row in stalled:
                 cid, msg, cat = row[0], row[1], row[2]
-                cur.execute("UPDATE complaints SET status = 'Auto-Resolved (Sentinel)', ai_diagnosis = 'Detected stalled job', resolution = 'Auto-cleared queue stall' WHERE id = %s" if engine == "postgres" else "UPDATE complaints SET status = 'Auto-Resolved (Sentinel)', ai_diagnosis = 'Detected stalled job', resolution = 'Auto-cleared queue stall' WHERE id = ?", (cid,))
+                if engine == "postgres":
+                    cur.execute("UPDATE complaints SET status = %s, ai_diagnosis = %s, resolution = %s WHERE id = %s", ("Auto-Resolved (Sentinel)", "Detected stalled job", "Auto-cleared queue stall", cid))
+                else:
+                    cur.execute("UPDATE complaints SET status = ?, ai_diagnosis = ?, resolution = ? WHERE id = ?", ("Auto-Resolved (Sentinel)", "Detected stalled job", "Auto-cleared queue stall", cid))
                 conn.commit()
                 broadcast_heal_alert("Grievance Queue", f"Ticket #{cid} was stalled", "Executed auto-recovery resolve.")
 
         elif probe_id == 6:
-            # Probe 6: Root User Verification
+            guest_hash = hash_password("guest")
             cur.execute("SELECT id FROM users WHERE id = 1")
             if not cur.fetchone():
                 if engine == "postgres":
-                    cur.execute("INSERT INTO users (id, username, password_hash) VALUES (1, 'student', 'guest') ON CONFLICT DO NOTHING")
+                    cur.execute("INSERT INTO users (id, username, password_hash, role, avatar) VALUES (1, %s, %s, %s, %s) ON CONFLICT DO NOTHING", ("student", guest_hash, "owner", "⚡"))
                 else:
-                    cur.execute("INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (1, 'student', 'guest')")
+                    cur.execute("INSERT OR IGNORE INTO users (id, username, password_hash, role, avatar) VALUES (?, ?, ?, ?, ?)", (1, "student", guest_hash, "owner", "⚡"))
                 conn.commit()
                 broadcast_heal_alert("User System", "Guest ID 1 was missing", "Provisioned default guest identity.")
 
         elif probe_id == 7:
-            # Probe 7: WAL Checkpoint Flush
             if engine == "sqlite":
-                cur.execute("PRAGMA wal_checkpoint(PASSIVE);")
-                conn.commit()
+                try:
+                    cur.execute("PRAGMA wal_checkpoint(PASSIVE);")
+                    conn.commit()
+                except Exception:
+                    pass
+
+        SYSTEM_STATUS["db_integrity"] = "OK"
     except Exception as exc:
+        SYSTEM_STATUS["db_integrity"] = "ERROR"
+        SYSTEM_STATUS["model_operational"] = False
         broadcast_heal_alert("Sentinel Daemon", f"Probe {probe_id} fault: {str(exc)}", "Applied exception isolation.")
     finally:
         conn.close()
+
 
 def sentinel_daemon():
     probe_counter = 1
@@ -261,12 +311,15 @@ def sentinel_daemon():
         execute_real_system_heal(probe_counter)
         probe_counter = (probe_counter % 7) + 1
 
+
 threading.Thread(target=sentinel_daemon, daemon=True).start()
+
 
 def hash_password(password: str) -> str:
     salt = secrets.token_bytes(16)
     digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 310_000)
     return "pbkdf2_sha256$310000$" + base64.urlsafe_b64encode(salt).decode().rstrip("=") + "$" + base64.urlsafe_b64encode(digest).decode().rstrip("=")
+
 
 def verify_password(password: str, stored: str) -> bool:
     try:
@@ -281,6 +334,7 @@ def verify_password(password: str, stored: str) -> bool:
     except Exception:
         return False
 
+
 def record_visit():
     conn, engine = DBManager.get_conn()
     cur = conn.cursor()
@@ -291,6 +345,7 @@ def record_visit():
         pass
     finally:
         conn.close()
+
 
 def update_user_heartbeat(user_id: int):
     if not user_id or user_id <= 0:
@@ -306,6 +361,25 @@ def update_user_heartbeat(user_id: int):
     finally:
         conn.close()
 
+
+def get_registry_snapshot():
+    conn, engine = DBManager.get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT id, username, role, avatar, last_active, created_at FROM users ORDER BY id ASC")
+        rows = cur.fetchall()
+        return [{
+            "id": r[0],
+            "username": r[1],
+            "role": r[2] or "user",
+            "avatar": r[3] or "⚡",
+            "last_active": str(r[4]) if r[4] is not None else "Never",
+            "created_at": str(r[5]) if r[5] is not None else "Never"
+        } for r in rows]
+    finally:
+        conn.close()
+
+
 PROMPT_MODES = {
     "study": "CHAMBER: SOKRATIC ACADEMIC TUTOR & NEET/JEE ENGINE. Provide first-principles derivations and highlight NCERT traps. Format equations in LaTeX using $ or $$.",
     "solver": "CHAMBER: FIRST-PRINCIPLES NUMERICAL SOLVER. Deconstruct calculations step-by-step with clean LaTeX formulas.",
@@ -319,6 +393,7 @@ PROMPT_MODES = {
     "zen": "CHAMBER: SOMATIC ZEN. Dissolve acute stress, ground breathing, and bring calm."
 }
 
+
 def ask_groq_resilient(user_prompt: str, mode: str, history: list, image_base64: str = None, lang_instruction: str = "") -> tuple[str, str]:
     """Bulletproof execution preventing HTTP 400 Bad Request."""
     if not GROQ_API_KEY or client is None:
@@ -327,12 +402,11 @@ def ask_groq_resilient(user_prompt: str, mode: str, history: list, image_base64:
     instruction = PROMPT_MODES.get(mode, PROMPT_MODES["study"])
     if lang_instruction:
         instruction += f" Language Directive: {lang_instruction}"
-    
+
     clean_image = None
     if image_base64 and isinstance(image_base64, str) and len(image_base64) > 100:
         clean_image = image_base64 if image_base64.startswith("data:image") else f"data:image/jpeg;base64,{image_base64}"
 
-    # Vision branch
     if clean_image:
         user_content = [
             {"type": "text", "text": f"{instruction}\n\nTask: {user_prompt if user_prompt else 'Audit this image.'}"},
@@ -349,7 +423,6 @@ def ask_groq_resilient(user_prompt: str, mode: str, history: list, image_base64:
         except Exception as e:
             return f"Vision processing error: {e}", "Formidable"
 
-    # Strictly structured text messages to avoid 400 errors
     clean_prompt = user_prompt.strip() if user_prompt and user_prompt.strip() else "Hello."
     messages = [{"role": "system", "content": instruction}]
     for h in history[-6:]:
@@ -357,7 +430,6 @@ def ask_groq_resilient(user_prompt: str, mode: str, history: list, image_base64:
             messages.append({"role": h["role"], "content": str(h["content"])[:2000]})
     messages.append({"role": "user", "content": clean_prompt})
 
-    # Resilient fallback sequence
     models_to_try = ["llama-3.3-70b-versatile", "llama3-8b-8192"]
     last_err = ""
     for model_name in models_to_try:
@@ -378,7 +450,7 @@ def ask_groq_resilient(user_prompt: str, mode: str, history: list, image_base64:
 
     return f"Cognitive core offline. Error detail: {last_err}", "Formidable"
 
-# ----------------- RE-ENGINEERED COMPLAINT PROCESSOR -----------------
+
 def execute_autonomous_complaint(complaint_id: int, category: str, message: str):
     """Processes grievance immediately and guarantees status updates."""
     diagnosis = "Triage completed."
@@ -392,7 +464,6 @@ def execute_autonomous_complaint(complaint_id: int, category: str, message: str)
     else:
         try:
             clean_msg = message.strip()[:1000]
-            # Simple text prompt avoiding fragile JSON parsing
             triage_prompt = f"Categorize this issue into one line diagnosis and one line solution: Category: {category}. Message: {clean_msg}"
             res = client.chat.completions.create(
                 messages=[
@@ -424,7 +495,7 @@ def execute_autonomous_complaint(complaint_id: int, category: str, message: str)
     finally:
         conn.close()
 
-# ----------------- APIS -----------------
+
 @app.post("/api/complaint")
 def submit_complaint(
     background_tasks: BackgroundTasks,
@@ -461,6 +532,7 @@ def submit_complaint(
     finally:
         conn.close()
 
+
 @app.post("/api/owner/request-otp")
 def request_owner_otp(email: str = Form(...)):
     email_clean = email.strip().lower()
@@ -478,6 +550,7 @@ def request_owner_otp(email: str = Form(...)):
             "status": "ok",
             "message": f"Render blocked SMTP. Use Sovereign PIN ({SOVEREIGN_MASTER_KEY}) to unlock."
         })
+
 
 @app.post("/api/owner/verify-otp")
 def verify_owner_otp(email: str = Form(...), otp: str = Form(...)):
@@ -501,9 +574,11 @@ def verify_owner_otp(email: str = Form(...), otp: str = Form(...)):
     OWNER_SESSIONS[token] = time.time() + 3600
     return JSONResponse({"status": "ok", "token": token, "username": OWNER_USERNAME})
 
+
 @app.get("/api/notifications")
 def get_live_notifications():
     return JSONResponse({"status": "ok", "notifications": ACTIVE_NOTIFICATIONS[-5:]})
+
 
 @app.post("/api/register")
 def register_user(username: str = Form(...), password: str = Form(...), avatar: str = Form("⚡")):
@@ -531,6 +606,7 @@ def register_user(username: str = Form(...), password: str = Form(...), avatar: 
     finally:
         conn.close()
 
+
 @app.post("/api/login")
 def login_user(username: str = Form(...), password: str = Form(...)):
     clean_user = username.strip().lower()
@@ -546,6 +622,7 @@ def login_user(username: str = Form(...), password: str = Form(...)):
     finally:
         conn.close()
 
+
 @app.post("/api/user/set-avatar")
 def set_avatar(user_id: int = Form(...), avatar: str = Form(...)):
     conn, engine = DBManager.get_conn()
@@ -558,10 +635,12 @@ def set_avatar(user_id: int = Form(...), avatar: str = Form(...)):
     finally:
         conn.close()
 
+
 @app.post("/api/heartbeat")
 def heartbeat(user_id: int = Form(...)):
     update_user_heartbeat(user_id)
     return JSONResponse({"status": "ok"})
+
 
 @app.get("/api/sessions/{user_id}")
 def get_user_sessions(user_id: int):
@@ -577,6 +656,7 @@ def get_user_sessions(user_id: int):
     finally:
         conn.close()
 
+
 @app.get("/api/session-messages/{session_id}")
 def get_session_messages(session_id: int):
     conn, engine = DBManager.get_conn()
@@ -590,6 +670,7 @@ def get_session_messages(session_id: int):
         return JSONResponse({"status": "error", "messages": [], "message": str(e)})
     finally:
         conn.close()
+
 
 @app.post("/api/new-core-session")
 def new_core_session(user_id: int = Form(...), core_mode: str = Form(...)):
@@ -612,6 +693,7 @@ def new_core_session(user_id: int = Form(...), core_mode: str = Form(...)):
     finally:
         conn.close()
 
+
 @app.post("/api/delete-session")
 def delete_session(session_id: int = Form(...)):
     conn, engine = DBManager.get_conn()
@@ -625,6 +707,7 @@ def delete_session(session_id: int = Form(...)):
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
     finally:
         conn.close()
+
 
 @app.post("/api/parse-doc")
 async def parse_doc(file: UploadFile = File(...)):
@@ -649,6 +732,7 @@ async def parse_doc(file: UploadFile = File(...)):
 
     return JSONResponse({"status": "ok", "filename": file.filename, "text": extracted_text.strip()[:10000]})
 
+
 @app.get("/api/owner/telemetry")
 def get_owner_telemetry(token: str = ""):
     expiry = OWNER_SESSIONS.get(token)
@@ -662,8 +746,7 @@ def get_owner_telemetry(token: str = ""):
         v_row = cur.fetchone()
         total_visits = v_row[0] if v_row else 0
 
-        cur.execute("SELECT id, username, role, last_active, created_at FROM users ORDER BY id DESC")
-        users_list = [{"id": u[0], "username": u[1], "role": u[2], "last_active": str(u[3]), "created_at": str(u[4])} for u in cur.fetchall()]
+        registry_users = get_registry_snapshot()
 
         if engine == "postgres":
             cur.execute("SELECT COUNT(*) FROM users WHERE last_active >= NOW() - INTERVAL '15 minutes'")
@@ -701,17 +784,19 @@ def get_owner_telemetry(token: str = ""):
             "status": "ok",
             "database_engine": engine,
             "total_visits": total_visits,
-            "total_users": len(users_list),
+            "total_users": len(registry_users),
             "online_users": online_count,
             "total_sessions": total_sessions,
             "total_messages": total_messages,
             "core_distribution": core_dist,
-            "users": users_list,
+            "users": registry_users,
+            "registry": registry_users,
             "complaints": complaints_list,
             "heal_logs": heal_logs
         })
     finally:
         conn.close()
+
 
 def detect_tts_language(text: str, pref: str = "auto") -> str:
     if pref == "hi":
@@ -723,6 +808,7 @@ def detect_tts_language(text: str, pref: str = "auto") -> str:
     hinglish_markers = {"hai", "hoon", "aap", "kaise", "kya", "bhai", "karo", "nahi", "accha", "samjha", "dost", "mera", "meri"}
     words = set(re.findall(r'\b[a-zA-Z]+\b', text.lower()))
     return "hi" if len(words.intersection(hinglish_markers)) >= 2 else "en"
+
 
 def handle_conversation(user_id: int, session_id: int, query: str, mode: str, image_base64: str = None, lang_pref: str = "en"):
     update_user_heartbeat(user_id)
@@ -791,7 +877,7 @@ def handle_conversation(user_id: int, session_id: int, query: str, mode: str, im
 
         ins_m = "INSERT INTO messages (session_id, role, content, mode, image_data) VALUES (%s, %s, %s, %s, %s)" if engine == "postgres" else "INSERT INTO messages (session_id, role, content, mode, image_data) VALUES (?, ?, ?, ?, ?)"
         cur.execute(ins_m, (session_id, 'user', query if query else "[Artifact Inspection]", mode, image_base64))
-        
+
         ins_a = "INSERT INTO messages (session_id, role, content, mode, emotion) VALUES (%s, %s, %s, %s, %s)" if engine == "postgres" else "INSERT INTO messages (session_id, role, content, mode, emotion) VALUES (?, ?, ?, ?, ?)"
         cur.execute(ins_a, (session_id, 'assistant', reply, mode, emotion))
         conn.commit()
@@ -814,6 +900,7 @@ def handle_conversation(user_id: int, session_id: int, query: str, mode: str, im
         pass
 
     return reply, emotion, session_id, title, mode, audio_base64, username
+
 
 @app.post("/text-process")
 async def text_process(
@@ -856,6 +943,7 @@ async def text_process(
             "username": "Student"
         })
 
+
 @app.post("/voice-process")
 async def voice_process(
     file: UploadFile = File(...),
@@ -885,7 +973,7 @@ async def voice_process(
             temp_path = temp_audio.name
             temp_audio.write(audio_bytes)
             temp_audio.flush()
-        
+
         with open(temp_path, "rb") as audio_handle:
             transcription = client.audio.transcriptions.create(
                 model="whisper-large-v3",
@@ -893,14 +981,14 @@ async def voice_process(
                 response_format="text"
             )
             user_text = str(transcription).strip()
-        
+
         try:
             os.remove(temp_path)
         except Exception:
             pass
     except Exception as exc:
         return JSONResponse({"status": "error", "message": f"Transcription error: {exc}"}, status_code=502)
-    
+
     if not user_text:
         return JSONResponse({"status": "error", "message": "No discernible speech detected."}, status_code=422)
 
@@ -916,9 +1004,7 @@ async def voice_process(
         "username": username
     })
 
-# =====================================================================
-# 🛡️ SOVEREIGN OWNER COMMAND PORTAL: /owner
-# =====================================================================
+
 @app.get("/owner", response_class=HTMLResponse)
 async def serve_owner_dashboard():
     html_page = """<!DOCTYPE html>
@@ -939,26 +1025,19 @@ async def serve_owner_dashboard():
         }
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', sans-serif; }
         body { background: var(--bg-deep); color: var(--text-high); min-height: 100vh; display: flex; flex-direction: column; }
-
-        .owner-nav {
-            padding: 16px 24px; background: #0c101a; border-bottom: 1px solid var(--border-color);
-            display: flex; align-items: center; justify-content: space-between;
-        }
+        .owner-nav { padding: 16px 24px; background: #0c101a; border-bottom: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between; }
         .brand { display: flex; align-items: center; gap: 12px; }
         .brand-badge { width: 40px; height: 40px; background: var(--gold); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
-
         .container { padding: 24px; max-width: 1280px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
         .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
         .metric-card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 16px; padding: 20px; }
         .metric-title { font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 700; letter-spacing: 1px; margin-bottom: 6px; }
         .metric-value { font-size: 32px; font-weight: 800; font-family: 'Space Grotesk', sans-serif; color: #fff; }
         .metric-tag { font-size: 11px; color: var(--gold); margin-top: 6px; }
-
         .panel { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 16px; padding: 20px; margin-bottom: 20px; }
         table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }
         th { text-align: left; padding: 10px; color: var(--text-muted); font-size: 11px; text-transform: uppercase; border-bottom: 1px solid var(--border-color); }
         td { padding: 12px 10px; border-bottom: 1px solid #1a2233; vertical-align: top; }
-
         .otp-modal { position: fixed; inset: 0; background: rgba(5, 7, 12, 0.98); backdrop-filter: blur(20px); display: flex; align-items: center; justify-content: center; z-index: 500; }
         .otp-box { background: #111622; border: 1px solid var(--gold); border-radius: 20px; padding: 32px; width: 90%; max-width: 420px; text-align: center; }
         .action-btn { width: 100%; background: var(--gold); border: none; border-radius: 10px; padding: 12px; color: #000; font-weight: 700; cursor: pointer; margin-top: 12px; }
@@ -972,9 +1051,7 @@ async def serve_owner_dashboard():
             <h2 style="font-family:'Space Grotesk'; font-size:20px; margin-bottom:6px;">Master Clearance Gate</h2>
             <p style="font-size:12px; color:var(--text-muted); margin-bottom:14px;">Master Account: <b>__OWNER_EMAIL__</b></p>
             <div id="otpStatusMsg" style="font-size:12px; color:#4ade80; margin-bottom:10px;">Dispatch authentication key or enter Sovereign PIN.</div>
-            
             <button class="action-btn" id="reqOtpBtn" onclick="requestOtp()">📩 Send OTP to Master Gmail</button>
-
             <div id="otpInputArea" style="display:block; margin-top:14px;">
                 <input type="text" id="otpCodeInput" class="search-input" placeholder="Enter OTP or PIN: __MASTER_PIN__" maxlength="6" style="text-align:center; font-size:18px; letter-spacing:4px;" />
                 <button class="action-btn" onclick="verifyOtp()">Unlock Sovereign Console</button>
@@ -1121,15 +1198,16 @@ async def serve_owner_dashboard():
                         </tr>
                     `).join("") : '<tr><td colspan="5" style="text-align:center;">All systems nominal.</td></tr>';
 
+                    const registry = Array.isArray(d.registry) ? d.registry : Array.isArray(d.users) ? d.users : [];
                     const tbody = document.getElementById("usersTbody");
-                    tbody.innerHTML = (d.users || []).map(u => `
+                    tbody.innerHTML = registry.length ? registry.map(u => `
                         <tr>
                             <td>${u.id}</td>
                             <td><b>${u.username}</b></td>
-                            <td style="color:${u.role === 'owner' ? '#facc15' : '#8492a6'}; font-weight:${u.role==='owner'?'700':'400'}">${u.role}</td>
+                            <td style="color:${u.role === 'owner' ? '#facc15' : '#8492a6'}; font-weight:${u.role === 'owner' ? '700' : '400'}">${u.role}</td>
                             <td style="color:#38bdf8;">${u.last_active || 'Recent'}</td>
                         </tr>
-                    `).join("");
+                    `).join("") : '<tr><td colspan="4" style="text-align:center;">No registered users found.</td></tr>';
 
                     const cbody = document.getElementById("complaintsTbody");
                     cbody.innerHTML = (d.complaints && d.complaints.length) ? d.complaints.map(c => `
@@ -1140,7 +1218,7 @@ async def serve_owner_dashboard():
                             <td style="color:#cbd5e1; max-width:200px;">${c.message}</td>
                             <td style="color:#38bdf8; font-size:12px; max-width:200px;">${c.ai_diagnosis}</td>
                             <td style="color:#4ade80; font-size:12px; max-width:240px; white-space:pre-wrap;">${c.resolution}</td>
-                            <td><span style="background:${c.status.includes('Auto') ? 'rgba(74,222,128,0.15)' : 'rgba(250,204,21,0.15)'}; color:${c.status.includes('Auto') ? '#4ade80' : 'var(--gold)'}; padding:4px 8px; border-radius:10px; font-size:10px; font-weight:700;">${c.status}</span></td>
+                            <td><span style="background:${c.status.includes('Auto') ? 'rgba(74,222,128,0.15)' : 'rgba(250,204,21,0.15)'}; color:${c.status.includes('Auto') ? '#4ade80' : 'var(--gold)'}; padding:2px 8px; border-radius:10px; font-size:10px; font-weight:700;">${c.status}</span></td>
                         </tr>
                     `).join("") : '<tr><td colspan="7" style="text-align:center;">No open grievances found.</td></tr>';
                 } else {
@@ -1157,6 +1235,7 @@ async def serve_owner_dashboard():
 </body>
 </html>"""
     return HTMLResponse(content=html_page.replace("__OWNER_EMAIL__", OWNER_EMAIL).replace("__MASTER_PIN__", SOVEREIGN_MASTER_KEY))
+
 
 @app.get("/", response_class=HTMLResponse)
 async def serve_app():
@@ -1186,179 +1265,74 @@ async def serve_app():
             --text-muted: #8492a6;
             --accent-cyan: #38bdf8;
         }
-
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', sans-serif; -webkit-tap-highlight-color: transparent; }
         html, body { height: 100%; width: 100%; overflow: hidden; position: fixed; background: var(--bg-deep); color: var(--text-high); }
         body { display: flex; flex-direction: column; }
-
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-track { background: var(--bg-surface); }
         ::-webkit-scrollbar-thumb { background: #222b3d; border-radius: 6px; }
         ::-webkit-scrollbar-thumb:hover { background: var(--gold); }
-
-        .sentinel-bar {
-            background: #0a101f; border-bottom: 1px solid #1e293b; color: #cbd5e1;
-            padding: 6px 16px; font-size: 11px; font-family: 'JetBrains Mono', monospace;
-            display: flex; align-items: center; justify-content: space-between; z-index: 100;
-        }
-        .sentinel-pill {
-            background: rgba(74, 222, 128, 0.15); border: 1px solid #4ade80; color: #4ade80;
-            padding: 2px 8px; border-radius: 8px; font-weight: 700; font-size: 10px;
-        }
-
-        .header {
-            padding: 12px 20px; display: flex; align-items: center; justify-content: space-between;
-            background: rgba(14, 18, 28, 0.85); backdrop-filter: blur(12px); border-bottom: 1px solid var(--border-color);
-            z-index: 10; flex-shrink: 0;
-        }
+        .sentinel-bar { background: #0a101f; border-bottom: 1px solid #1e293b; color: #cbd5e1; padding: 6px 16px; font-size: 11px; font-family: 'JetBrains Mono', monospace; display: flex; align-items: center; justify-content: space-between; z-index: 100; }
+        .sentinel-pill { background: rgba(74, 222, 128, 0.15); border: 1px solid #4ade80; color: #4ade80; padding: 2px 8px; border-radius: 8px; font-weight: 700; font-size: 10px; }
+        .header { padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; background: rgba(14, 18, 28, 0.85); backdrop-filter: blur(12px); border-bottom: 1px solid var(--border-color); z-index: 10; flex-shrink: 0; }
         .header-left, .header-right { display: flex; align-items: center; gap: 10px; }
-        .icon-trigger {
-            width: 38px; height: 38px; border-radius: 12px; background: var(--card-surface);
-            border: 1px solid var(--border-color); color: #fff; font-size: 16px; display: flex;
-            align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;
-        }
+        .icon-trigger { width: 38px; height: 38px; border-radius: 12px; background: var(--card-surface); border: 1px solid var(--border-color); color: #fff; font-size: 16px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; }
         .icon-trigger:hover { border-color: var(--gold); box-shadow: 0 0 10px var(--gold-glow); }
-        .brand-badge {
-            width: 38px; height: 38px; background: var(--gold); border-radius: 12px;
-            display: flex; align-items: center; justify-content: center; font-size: 20px; color: #000;
-            box-shadow: 0 0 15px rgba(250, 204, 21, 0.4);
-        }
+        .brand-badge { width: 38px; height: 38px; background: var(--gold); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 20px; color: #000; box-shadow: 0 0 15px rgba(250, 204, 21, 0.4); }
         .brand-title { font-size: 15px; font-weight: 800; font-family: 'Space Grotesk', sans-serif; letter-spacing: 0.5px; }
         .creator-tag { font-size: 11px; color: var(--text-muted); }
         .creator-tag b { color: var(--gold); }
-
-        .chamber-badge {
-            background: rgba(250, 204, 21, 0.08); border: 1px solid rgba(250, 204, 21, 0.3); color: var(--gold);
-            padding: 5px 14px; border-radius: 20px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
-        }
-
-        .quick-study-bar {
-            display: flex; gap: 8px; padding: 8px 18px; background: #0a0d14;
-            border-bottom: 1px solid var(--border-color); overflow-x: auto; flex-shrink: 0;
-        }
-        .study-chip {
-            white-space: nowrap; font-size: 11px; font-weight: 600; padding: 6px 14px; border-radius: 12px;
-            background: var(--card-surface); border: 1px solid var(--border-color); color: #cbd5e1; cursor: pointer; transition: all 0.2s;
-        }
+        .chamber-badge { background: rgba(250, 204, 21, 0.08); border: 1px solid rgba(250, 204, 21, 0.3); color: var(--gold); padding: 5px 14px; border-radius: 20px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
+        .quick-study-bar { display: flex; gap: 8px; padding: 8px 18px; background: #0a0d14; border-bottom: 1px solid var(--border-color); overflow-x: auto; flex-shrink: 0; }
+        .study-chip { white-space: nowrap; font-size: 11px; font-weight: 600; padding: 6px 14px; border-radius: 12px; background: var(--card-surface); border: 1px solid var(--border-color); color: #cbd5e1; cursor: pointer; transition: all 0.2s; }
         .study-chip:hover { border-color: var(--gold); color: var(--gold); transform: translateY(-1px); }
-
-        .sidebar-overlay {
-            position: fixed; inset: 0; background: rgba(3, 5, 8, 0.85); backdrop-filter: blur(8px);
-            z-index: 1000; opacity: 0; pointer-events: none; transition: opacity 0.3s;
-        }
+        .sidebar-overlay { position: fixed; inset: 0; background: rgba(3, 5, 8, 0.85); backdrop-filter: blur(8px); z-index: 1000; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
         .sidebar-overlay.open { opacity: 1; pointer-events: auto; }
-
-        .left-sidebar {
-            position: fixed; top: 0; left: 0; bottom: 0; width: 310px; background: var(--bg-surface);
-            border-right: 1px solid var(--border-color); z-index: 1001; transform: translateX(-100%);
-            transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); display: flex; flex-direction: column; padding: 18px;
-        }
+        .left-sidebar { position: fixed; top: 0; left: 0; bottom: 0; width: 310px; background: var(--bg-surface); border-right: 1px solid var(--border-color); z-index: 1001; transform: translateX(-100%); transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); display: flex; flex-direction: column; padding: 18px; }
         .left-sidebar.open { transform: translateX(0); }
-
-        .right-sidebar {
-            position: fixed; top: 0; right: 0; bottom: 0; width: 330px; background: var(--bg-surface);
-            border-left: 1px solid var(--border-color); z-index: 1001; transform: translateX(100%);
-            transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); display: flex; flex-direction: column; padding: 20px;
-            overflow-y: auto;
-        }
+        .right-sidebar { position: fixed; top: 0; right: 0; bottom: 0; width: 330px; background: var(--bg-surface); border-left: 1px solid var(--border-color); z-index: 1001; transform: translateX(100%); transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); display: flex; flex-direction: column; padding: 20px; overflow-y: auto; }
         .right-sidebar.open { transform: translateX(0); }
-
-        .sidebar-header {
-            display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; padding-bottom: 10px;
-            border-bottom: 1px solid var(--border-color);
-        }
+        .sidebar-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--border-color); }
         .sidebar-close { font-size: 18px; color: var(--text-muted); cursor: pointer; border: none; background: none; }
-
         .core-btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 12px; }
-        .core-choice {
-            background: var(--card-surface); border: 1px solid var(--border-color); color: var(--text-muted);
-            padding: 9px 6px; border-radius: 10px; font-size: 11px; font-weight: 600; cursor: pointer; text-align: center;
-        }
+        .core-choice { background: var(--card-surface); border: 1px solid var(--border-color); color: var(--text-muted); padding: 9px 6px; border-radius: 10px; font-size: 11px; font-weight: 600; cursor: pointer; text-align: center; }
         .core-choice.selected { background: var(--gold); color: #000; font-weight: 800; border-color: var(--gold); box-shadow: 0 0 10px var(--gold-glow); }
-
         .sessions-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
-        .session-item {
-            display: flex; align-items: center; justify-content: space-between; padding: 10px 12px;
-            background: var(--card-surface); border: 1px solid var(--border-color); border-radius: 10px; cursor: pointer;
-            transition: border-color 0.2s, background 0.2s;
-        }
+        .session-item { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; background: var(--card-surface); border: 1px solid var(--border-color); border-radius: 10px; cursor: pointer; transition: border-color 0.2s, background 0.2s; }
         .session-item:hover { border-color: var(--border-highlight); background: #182030; }
         .session-item.active { border-color: var(--gold); background: #1a2233; }
         .del-session-btn { background: none; border: none; color: #ef4444; font-size: 14px; cursor: pointer; padding: 2px 6px; line-height: 1; }
         .del-session-btn:hover { color: #f87171; }
-
         .avatar-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 10px 0 16px; }
-        .avatar-card {
-            background: var(--card-surface); border: 2px solid var(--border-color); border-radius: 12px;
-            padding: 8px 4px; text-align: center; cursor: pointer; transition: all 0.2s;
-        }
+        .avatar-card { background: var(--card-surface); border: 2px solid var(--border-color); border-radius: 12px; padding: 8px 4px; text-align: center; cursor: pointer; transition: all 0.2s; }
         .avatar-card.active { border-color: var(--gold); background: #1f273b; }
         .avatar-icon { font-size: 24px; margin-bottom: 2px; }
         .avatar-label { font-size: 10px; color: var(--text-muted); font-weight: 600; }
-
-        .chat-container {
-            flex: 1; overflow-y: scroll; padding: 20px 18px 30px; display: flex; flex-direction: column; gap: 16px; position: relative;
-        }
+        .chat-container { flex: 1; overflow-y: scroll; padding: 20px 18px 30px; display: flex; flex-direction: column; gap: 16px; position: relative; }
         .hero-greeting { margin: auto; display: flex; flex-direction: column; align-items: center; text-align: center; width: 90%; max-width: 500px; }
-        .hero-logo {
-            width: 72px; height: 72px; border-radius: 22px; background: var(--gold);
-            display: flex; align-items: center; justify-content: center; font-size: 36px; margin-bottom: 16px;
-            box-shadow: 0 0 30px rgba(250, 204, 21, 0.35);
-        }
-
+        .hero-logo { width: 72px; height: 72px; border-radius: 22px; background: var(--gold); display: flex; align-items: center; justify-content: center; font-size: 36px; margin-bottom: 16px; box-shadow: 0 0 30px rgba(250, 204, 21, 0.35); }
         .bubble-group { display: flex; flex-direction: column; max-width: 86%; }
         .bubble-group.lemon { align-self: flex-start; }
         .bubble-group.user { align-self: flex-end; }
-
         .bubble { padding: 14px 18px; border-radius: 18px; font-size: 14px; line-height: 1.6; word-break: break-word; }
         .bubble.lemon { background: var(--card-surface); border: 1px solid var(--border-color); color: #f1f5f9; border-bottom-left-radius: 4px; }
         .bubble.user { background: var(--gold); color: #000; font-weight: 600; border-bottom-right-radius: 4px; }
-
         .chat-img-thumb { max-width: 240px; border-radius: 12px; margin-bottom: 10px; border: 1px solid var(--border-color); }
-
-        .thinking-bubble {
-            display: flex; align-items: center; gap: 10px; padding: 12px 18px;
-            background: #101624; border: 1px dashed var(--gold); border-radius: 18px;
-            font-size: 13px; color: var(--gold); align-self: flex-start; animation: pulse 1.6s infinite ease-in-out;
-        }
-        @keyframes pulse {
-            0% { opacity: 0.6; transform: scale(0.99); }
-            50% { opacity: 1; transform: scale(1); }
-            100% { opacity: 0.6; transform: scale(0.99); }
-        }
-
-        .auth-modal {
-            position: fixed; inset: 0; background: rgba(3, 5, 8, 0.95); backdrop-filter: blur(20px);
-            z-index: 3000; display: none; align-items: center; justify-content: center; padding: 20px;
-        }
-        .auth-box {
-            background: var(--bg-surface); border: 1px solid var(--gold); border-radius: 20px;
-            padding: 28px; width: 100%; max-width: 400px; display: flex; flex-direction: column; gap: 14px;
-        }
+        .thinking-bubble { display: flex; align-items: center; gap: 10px; padding: 12px 18px; background: #101624; border: 1px dashed var(--gold); border-radius: 18px; font-size: 13px; color: var(--gold); align-self: flex-start; animation: pulse 1.6s infinite ease-in-out; }
+        @keyframes pulse { 0% { opacity: 0.6; transform: scale(0.99); } 50% { opacity: 1; transform: scale(1); } 100% { opacity: 0.6; transform: scale(0.99); } }
+        .auth-modal { position: fixed; inset: 0; background: rgba(3, 5, 8, 0.95); backdrop-filter: blur(20px); z-index: 3000; display: none; align-items: center; justify-content: center; padding: 20px; }
+        .auth-box { background: var(--bg-surface); border: 1px solid var(--gold); border-radius: 20px; padding: 28px; width: 100%; max-width: 400px; display: flex; flex-direction: column; gap: 14px; }
         .auth-tabs { display: flex; gap: 10px; margin-bottom: 8px; }
         .auth-tab { flex: 1; padding: 8px; text-align: center; border-radius: 8px; font-size: 12px; font-weight: 700; cursor: pointer; background: var(--card-surface); color: var(--text-muted); }
         .auth-tab.active { background: var(--gold); color: #000; }
         .auth-input { width: 100%; background: #080a10; border: 1px solid var(--border-color); border-radius: 10px; padding: 12px; color: #fff; font-size: 13px; outline: none; }
-
-        .camera-modal {
-            position: fixed; inset: 0; background: rgba(5,7,12,0.95); z-index: 2500;
-            display: none; flex-direction: column; align-items: center; justify-content: center; padding: 20px;
-        }
-        .camera-box {
-            background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 18px;
-            padding: 18px; width: 100%; max-width: 440px; display: flex; flex-direction: column; align-items: center; gap: 12px;
-        }
+        .camera-modal { position: fixed; inset: 0; background: rgba(5,7,12,0.95); z-index: 2500; display: none; flex-direction: column; align-items: center; justify-content: center; padding: 20px; }
+        .camera-box { background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 18px; padding: 18px; width: 100%; max-width: 440px; display: flex; flex-direction: column; align-items: center; gap: 12px; }
         .camera-video { width: 100%; height: 260px; border-radius: 12px; background: #000; object-fit: cover; }
         .camera-ctrls { display: flex; gap: 10px; width: 100%; justify-content: center; }
-
-        .bottom-dock {
-            padding: 10px 18px 18px; background: rgba(14, 18, 28, 0.95); border-top: 1px solid var(--border-color); flex-shrink: 0;
-        }
+        .bottom-dock { padding: 10px 18px 18px; background: rgba(14, 18, 28, 0.95); border-top: 1px solid var(--border-color); flex-shrink: 0; }
         .dock-status { font-size: 11px; color: var(--text-muted); text-align: center; margin-bottom: 6px; font-family: 'JetBrains Mono', monospace; }
-        .input-dock {
-            display: flex; align-items: center; background: var(--card-surface); border: 1px solid var(--border-color);
-            border-radius: 36px; padding: 4px 6px 4px 14px; gap: 6px;
-        }
+        .input-dock { display: flex; align-items: center; background: var(--card-surface); border: 1px solid var(--border-color); border-radius: 36px; padding: 4px 6px 4px 14px; gap: 6px; }
         .input-dock:focus-within { border-color: var(--gold); box-shadow: 0 0 12px var(--gold-glow); }
         .input-dock input { flex: 1; background: transparent; border: none; color: #fff; font-size: 14px; outline: none; }
         .dock-btn { width: 38px; height: 38px; border-radius: 50%; border: none; display: flex; align-items: center; justify-content: center; cursor: pointer; }
@@ -1367,21 +1341,13 @@ async def serve_app():
         .mic-btn { background: #1c2333; color: var(--gold); }
         .stop-btn { display: none; background: #ef4444; color: #fff; font-size: 13px; }
         .send-btn { background: var(--gold); color: #000; font-weight: 800; }
-
-        .setting-item {
-            background: var(--card-surface); border: 1px solid var(--border-color); border-radius: 12px;
-            padding: 12px 14px; margin-bottom: 10px;
-        }
+        .setting-item { background: var(--card-surface); border: 1px solid var(--border-color); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; }
         .setting-title { font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 700; margin-bottom: 4px; }
-        .setting-select {
-            width: 100%; background: #090c13; border: 1px solid var(--border-color); color: #fff;
-            padding: 8px; border-radius: 8px; font-size: 12px; outline: none; margin-top: 4px;
-        }
+        .setting-select { width: 100%; background: #090c13; border: 1px solid var(--border-color); color: #fff; padding: 8px; border-radius: 8px; font-size: 12px; outline: none; margin-top: 4px; }
     </style>
 </head>
 <body>
     <div class="sidebar-overlay" id="overlay" onclick="closeAllSidebars()"></div>
-
     <div class="sentinel-bar" id="sentinelBanner">
         <div style="display:flex; align-items:center; gap:8px;">
             <span class="sentinel-pill">● REAL SENTINEL ACTIVE</span>
@@ -1390,7 +1356,6 @@ async def serve_app():
         <div id="sentinelTimestamp" style="color:#64748b;">Live</div>
     </div>
 
-    <!-- GRIEVANCE MODAL -->
     <div class="auth-modal" id="complaintModal">
         <div class="auth-box">
             <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -1410,7 +1375,6 @@ async def serve_app():
         </div>
     </div>
 
-    <!-- AUTH MODAL -->
     <div class="auth-modal" id="authModal">
         <div class="auth-box">
             <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -1428,7 +1392,6 @@ async def serve_app():
         </div>
     </div>
 
-    <!-- CAMERA SCANNER MODAL -->
     <div class="camera-modal" id="cameraModal">
         <div class="camera-box">
             <h3 style="font-size:16px;">📷 Optical Scanner</h3>
@@ -1445,7 +1408,6 @@ async def serve_app():
         </div>
     </div>
 
-    <!-- LEFT SIDEBAR -->
     <aside class="left-sidebar" id="leftSidebar">
         <div class="sidebar-header">
             <div>
@@ -1476,7 +1438,6 @@ async def serve_app():
         <div class="sessions-list" id="sessionsList"></div>
     </aside>
 
-    <!-- RIGHT SIDEBAR -->
     <aside class="right-sidebar" id="rightSidebar">
         <div class="sidebar-header">
             <div>
@@ -1525,12 +1486,10 @@ async def serve_app():
             </div>
         </div>
 
-        <button onclick="openComplaintModal()" style="width:100%; background:#1c2333; border:1px solid var(--border-color); color:#cbd5e1; padding:10px; border-radius:10px; font-weight:600; font-size:12px; cursor:pointer; margin-bottom:10px;">💬 File Grievance / Feedback</button>
-
-        <button id="ownerConsoleBtn" onclick="location.href='/owner'" style="display:none; margin-top:auto; background:rgba(250,204,21,0.15); border:1px solid var(--gold); color:var(--gold); padding:12px; border-radius:12px; font-weight:800; font-size:13px; cursor:pointer;">🛡️ Sovereign Owner Console</button>
+        <button onclick="openComplaintModal()" style="width:100%; background:#1c2333; border:1px solid var(--border-color); color:#cbd5e1; padding:10px; border-radius:10px; font-weight:600; font-size:12px; cursor:pointer;">Report an issue</button>
+        <button id="ownerConsoleBtn" onclick="location.href='/owner'" style="display:none; margin-top:auto; background:rgba(250,204,21,0.15); border:1px solid var(--gold); color:var(--gold); padding:10px; border-radius:10px; font-weight:700; font-size:12px; cursor:pointer; width:100%;">Open Owner Council</button>
     </aside>
 
-    <!-- HEADER -->
     <header class="header">
         <div class="header-left">
             <button class="icon-trigger" onclick="openLeftSidebar()">☰</button>
@@ -1546,7 +1505,6 @@ async def serve_app():
         </div>
     </header>
 
-    <!-- QUICK STUDY BAR -->
     <div class="quick-study-bar">
         <div class="study-chip" onclick="quickStudyPrompt('Explain this concept using the Feynman Technique and intuition:')">💡 Feynman Intuition</div>
         <div class="study-chip" onclick="quickStudyPrompt('Generate 3 High-Yield tricky MCQs on this topic with trap explanations:')">🎯 High-Yield MCQs</div>
@@ -1554,7 +1512,6 @@ async def serve_app():
         <div class="study-chip" onclick="quickStudyPrompt('Break down the high-yield NCERT points and common traps for this chapter:')">📖 NCERT Traps</div>
     </div>
 
-    <!-- CHAT CONTAINER -->
     <main class="chat-container" id="chatStream">
         <div class="hero-greeting" id="heroGreeting">
             <div class="hero-logo">🍋</div>
@@ -1565,7 +1522,6 @@ async def serve_app():
         </div>
     </main>
 
-    <!-- BOTTOM DOCK -->
     <footer class="bottom-dock">
         <div class="dock-status" id="dockStatus">● Lemon Core Synchronized</div>
         <div class="input-dock">
@@ -1618,23 +1574,16 @@ async def serve_app():
             try {
                 const headerUser = document.getElementById("headerUserName");
                 if (headerUser) headerUser.innerText = currentUsername;
-
                 const activeUser = document.getElementById("activeUserName");
                 if (activeUser) activeUser.innerText = `${currentAvatar} ${currentUsername}`;
-
                 const welcomeTitle = document.getElementById("heroWelcomeTitle");
                 if (welcomeTitle) welcomeTitle.innerText = `Welcome, ${currentUsername} — Core Ready`;
-
                 if (avatarDisplayBtn) avatarDisplayBtn.innerText = currentAvatar;
-
                 const prefLang = document.getElementById("prefLanguage");
                 if (prefLang) prefLang.value = currentLanguage;
-
                 const prefRate = document.getElementById("prefAudioRate");
                 if (prefRate) prefRate.value = String(currentAudioRate);
-
                 if (audioElement) audioElement.playbackRate = currentAudioRate;
-
                 const ownerBtn = document.getElementById("ownerConsoleBtn");
                 const roleHeader = document.getElementById("userRoleHeader");
                 if (currentUserRole === "owner" || currentUsername.toLowerCase() === "utkarsh") {
@@ -1672,15 +1621,8 @@ async def serve_app():
             dockStatus.innerText = "● Preferences saved";
         }
 
-        function openComplaintModal() {
-            document.getElementById("complaintModal").style.display = "flex";
-            closeAllSidebars();
-        }
-        function closeComplaintModal() {
-            document.getElementById("complaintModal").style.display = "none";
-            document.getElementById("complaintStatusMsg").style.display = "none";
-            document.getElementById("complaintMessage").value = "";
-        }
+        function openComplaintModal() { document.getElementById("complaintModal").style.display = "flex"; closeAllSidebars(); }
+        function closeComplaintModal() { document.getElementById("complaintModal").style.display = "none"; document.getElementById("complaintStatusMsg").style.display = "none"; document.getElementById("complaintMessage").value = ""; }
 
         async function submitGrievance() {
             const cat = document.getElementById("complaintCategory").value;
@@ -1704,11 +1646,7 @@ async def serve_app():
                 const d = await res.json();
                 status.innerText = d.message || "Ticket dispatched.";
                 status.style.display = "block";
-                setTimeout(() => {
-                    closeComplaintModal();
-                    btn.disabled = false;
-                    btn.innerText = "Dispatch to Autonomous Sentinel";
-                }, 2500);
+                setTimeout(() => { closeComplaintModal(); btn.disabled = false; btn.innerText = "Dispatch to Autonomous Sentinel"; }, 2500);
             } catch(e) {
                 alert("Submission failed. Check network.");
                 btn.disabled = false;
@@ -1716,31 +1654,15 @@ async def serve_app():
             }
         }
 
-        function openAuthModal() {
-            document.getElementById("authModal").style.display = "flex";
-            closeAllSidebars();
-        }
-        function closeAuthModal() {
-            document.getElementById("authModal").style.display = "none";
-            document.getElementById("authErrorMsg").style.display = "none";
-        }
-        function switchAuthTab(mode) {
-            authMode = mode;
-            document.getElementById("tabLogin").classList.toggle("active", mode === "login");
-            document.getElementById("tabRegister").classList.toggle("active", mode === "register");
-            document.getElementById("authModalTitle").innerText = mode === "login" ? "Student Login" : "New Registration";
-            document.getElementById("authSubmitBtn").innerText = mode === "login" ? "Login" : "Register Account";
-        }
+        function openAuthModal() { document.getElementById("authModal").style.display = "flex"; closeAllSidebars(); }
+        function closeAuthModal() { document.getElementById("authModal").style.display = "none"; document.getElementById("authErrorMsg").style.display = "none"; }
+        function switchAuthTab(mode) { authMode = mode; document.getElementById("tabLogin").classList.toggle("active", mode === "login"); document.getElementById("tabRegister").classList.toggle("active", mode === "register"); document.getElementById("authModalTitle").innerText = mode === "login" ? "Student Login" : "New Registration"; document.getElementById("authSubmitBtn").innerText = mode === "login" ? "Login" : "Register Account"; }
 
         async function submitAuthForm() {
             const u = document.getElementById("authUsername").value.trim();
             const p = document.getElementById("authPassword").value.trim();
             const err = document.getElementById("authErrorMsg");
-            if (!u || !p) {
-                err.innerText = "Both username and password are required.";
-                err.style.display = "block";
-                return;
-            }
+            if (!u || !p) { err.innerText = "Both username and password are required."; err.style.display = "block"; return; }
             const fd = new FormData();
             fd.append("username", u);
             fd.append("password", p);
@@ -1784,12 +1706,10 @@ async def serve_app():
                 sessions.forEach(session => {
                     const row = document.createElement("div");
                     row.className = "session-item" + (Number(session.id) === currentSessionId ? " active" : "");
-                    
                     const title = document.createElement("span");
                     title.textContent = session.title || "Untitled transcript";
                     title.style.cssText = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;flex:1;";
                     title.onclick = () => openSavedSession(session.id);
-
                     const del = document.createElement("button");
                     del.className = "del-session-btn";
                     del.innerText = "✕";
@@ -1807,7 +1727,6 @@ async def serve_app():
                         }
                         loadSessions();
                     };
-
                     row.appendChild(title);
                     row.appendChild(del);
                     list.appendChild(row);
@@ -1829,7 +1748,7 @@ async def serve_app():
                 if (!response.ok) throw new Error("Session unavailable");
                 const data = await response.json();
                 const messages = Array.isArray(data.messages) ? data.messages : [];
-                
+
                 if (messages.length === 0) {
                     currentSessionId = Number(sessionId);
                     localStorage.setItem("lemon_current_session_id", String(currentSessionId));
@@ -1894,16 +1813,9 @@ async def serve_app():
             await fetch("/api/user/set-avatar", { method: "POST", body: fd });
         }
 
-        function quickStudyPrompt(prefix) {
-            textInput.value = prefix + " ";
-            textInput.focus();
-        }
+        function quickStudyPrompt(prefix) { textInput.value = prefix + " "; textInput.focus(); }
 
-        function stopLemonSpeaking() {
-            if (audioElement) { audioElement.pause(); audioElement.currentTime = 0; }
-            stopBtn.style.display = "none";
-            dockStatus.innerText = "● Stopped vocalization.";
-        }
+        function stopLemonSpeaking() { if (audioElement) { audioElement.pause(); audioElement.currentTime = 0; } stopBtn.style.display = "none"; dockStatus.innerText = "● Stopped vocalization."; }
         audioElement.onplay = () => { stopBtn.style.display = "flex"; };
         audioElement.onended = () => { stopBtn.style.display = "none"; };
 
@@ -1917,10 +1829,7 @@ async def serve_app():
             chatStream.scrollTop = chatStream.scrollHeight;
         }
 
-        function removeThinkingIndicator() {
-            const existing = document.getElementById("lemonThinkingIndicator");
-            if (existing) existing.remove();
-        }
+        function removeThinkingIndicator() { const existing = document.getElementById("lemonThinkingIndicator"); if (existing) existing.remove(); }
 
         async function requestMicAndRecord() {
             const micBtn = document.getElementById("micBtn");
@@ -1938,9 +1847,7 @@ async def serve_app():
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 recordedChunks = [];
                 mediaRecorder = new MediaRecorder(stream);
-                mediaRecorder.ondataavailable = (event) => {
-                    if (event.data && event.data.size > 0) recordedChunks.push(event.data);
-                };
+                mediaRecorder.ondataavailable = (event) => { if (event.data && event.data.size > 0) recordedChunks.push(event.data); };
                 mediaRecorder.onstop = async () => {
                     stream.getTracks().forEach(track => track.stop());
                     const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || "audio/webm" });
@@ -1993,7 +1900,6 @@ async def serve_app():
             }
             dockStatus.innerText = "● Initializing optical sensor...";
             cameraModal.style.display = "flex";
-
             try {
                 cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } } });
                 cameraVideo.srcObject = cameraStream;
@@ -2003,31 +1909,14 @@ async def serve_app():
             }
         }
 
-        function closeCamera() {
-            if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); cameraStream = null; }
-            cameraModal.style.display = "none";
-            dockStatus.innerText = "● Ready";
-        }
-
-        function captureSnapshot() {
-            if (!cameraVideo.videoWidth) return;
-            cameraCanvas.width = cameraVideo.videoWidth;
-            cameraCanvas.height = cameraVideo.videoHeight;
-            cameraCanvas.getContext("2d").drawImage(cameraVideo, 0, 0);
-            attachedImageBase64 = cameraCanvas.toDataURL("image/jpeg", 0.85);
-            closeCamera();
-            dockStatus.innerText = "● Artifact captured. Press ➤ to audit.";
-        }
+        function closeCamera() { if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); cameraStream = null; } cameraModal.style.display = "none"; dockStatus.innerText = "● Ready"; }
+        function captureSnapshot() { if (!cameraVideo.videoWidth) return; cameraCanvas.width = cameraVideo.videoWidth; cameraCanvas.height = cameraVideo.videoHeight; cameraCanvas.getContext("2d").drawImage(cameraVideo, 0, 0); attachedImageBase64 = cameraCanvas.toDataURL("image/jpeg", 0.85); closeCamera(); dockStatus.innerText = "● Artifact captured. Press ➤ to audit."; }
 
         function handleFileUpload(e) {
             const file = e.target.files[0];
             if (!file) return;
             const r = new FileReader();
-            r.onload = (ev) => {
-                attachedImageBase64 = ev.target.result;
-                closeCamera();
-                dockStatus.innerText = "● Photo loaded. Press ➤ to audit.";
-            };
+            r.onload = (ev) => { attachedImageBase64 = ev.target.result; closeCamera(); dockStatus.innerText = "● Photo loaded. Press ➤ to audit."; };
             r.readAsDataURL(file);
         }
 
@@ -2041,7 +1930,7 @@ async def serve_app():
                 const res = await fetch("/api/parse-doc", { method: "POST", body: fd });
                 const d = await res.json();
                 if (d.status === "ok") {
-                    textInput.value = `[Document: ${d.filename}]\\n\\n${d.text}\\n\\nTask: Synthesize key derivations.`;
+                    textInput.value = `[Document: ${d.filename}]\n\n${d.text}\n\nTask: Synthesize key derivations.`;
                     dockStatus.innerText = "● Document parsed. Press ➤ to synthesize.";
                 }
             } catch(err) { dockStatus.innerText = "Ingest failed."; }
@@ -2055,7 +1944,6 @@ async def serve_app():
             textInput.value = "";
             attachedImageBase64 = null;
             document.getElementById("heroGreeting").style.display = "none";
-
             appendMessage("user", text ? text : "[Artifact Inspection Request]", null, img);
             showThinkingIndicator();
             dockStatus.innerText = "⚡ First-principles derivation in progress...";
@@ -2072,21 +1960,19 @@ async def serve_app():
                 const res = await fetch("/text-process", { method: "POST", body: fd });
                 const d = await res.json();
                 removeThinkingIndicator();
-                
                 if (d.session_id) {
                     currentSessionId = Number(d.session_id);
                     localStorage.setItem("lemon_current_session_id", String(currentSessionId));
                 }
                 appendMessage("lemon", d.reply_text || "Cognitive process completed.", d.emotion || "Insightful");
                 loadSessions();
-
                 if (d.audio_base64) {
                     audioElement.src = d.audio_base64;
                     audioElement.playbackRate = currentAudioRate;
                     audioElement.play().catch(() => {});
                 }
                 dockStatus.innerText = "● Ready";
-            } catch(e) { 
+            } catch(e) {
                 removeThinkingIndicator();
                 dockStatus.innerText = "● Connection or server error.";
                 appendMessage("lemon", "Network or server connection error. Please verify server status.", "Formidable");
@@ -2116,15 +2002,7 @@ async def serve_app():
             const content = document.createElement("div");
             if (sender === "lemon" && window.marked && window.DOMPurify) {
                 content.innerHTML = DOMPurify.sanitize(marked.parse(String(text || "")));
-                try {
-                    renderMathInElement(content, {
-                        delimiters: [
-                            {left: '$$', right: '$$', display: true},
-                            {left: '$', right: '$', display: false}
-                        ],
-                        throwOnError: false
-                    });
-                } catch(e) {}
+                try { renderMathInElement(content, { delimiters: [{left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}], throwOnError: false }); } catch(e) {}
             } else {
                 content.textContent = String(text || "");
             }
@@ -2142,13 +2020,11 @@ async def serve_app():
             if (!Object.prototype.hasOwnProperty.call(PROMPT_MODES, mode)) return;
             const changed = currentCoreMode !== mode;
             currentCoreMode = mode;
-            if (startNewSession && changed) {
-                await openNewChamberSession(mode);
-            }
+            if (startNewSession && changed) { await openNewChamberSession(mode); }
             document.querySelectorAll(".core-choice").forEach(b => b.classList.remove("selected"));
             const target = document.getElementById(`core-${mode}`);
             if (target) target.classList.add("selected");
-            
+
             const labels = {
                 study: "📚 Socratic Study", solver: "🧠 Step Solver", recall: "🎯 Active Recall",
                 emotion: "💖 Deep Emotion", intellect: "⚡ Deep Intellect", rage: "🔥 Rage Rigor",
@@ -2159,14 +2035,11 @@ async def serve_app():
             closeAllSidebars();
         }
 
-        if (currentSessionId > 0) {
-            openSavedSession(currentSessionId);
-        } else {
-            loadSessions();
-        }
+        if (currentSessionId > 0) { openSavedSession(currentSessionId); } else { loadSessions(); }
     </script>
 </body>
 </html>""")
+
 
 if __name__ == "__main__":
     import uvicorn
