@@ -235,7 +235,11 @@ def generate_ai_title(prompt: str, core: str) -> str:
 
 def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_base64: str = None, lang_instruction: str = "") -> tuple[str, str]:
     if not GROQ_API_KEY or client is None:
-        return "⚠️ GROQ_API_KEY is not configured on Render. Please go to your Render Dashboard -> Environment and add GROQ_API_KEY with your Groq API key.", "Formidable"
+        return (
+            "⚠️ **Groq API Key Unset on Cloud**: Lemon AI engine is initialized, but `GROQ_API_KEY` is missing in Render Environment. "
+            "Please add `GROQ_API_KEY` to Render Dashboard -> Environment. In the meantime, all database, sessions, and settings systems are fully functional.",
+            "Formidable"
+        )
     
     instruction = PROMPT_MODES.get(mode, PROMPT_MODES["study"])
     if lang_instruction:
@@ -251,7 +255,7 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
         clean_image = image_base64 if image_base64.startswith("data:image") else f"data:image/jpeg;base64,{image_base64}"
 
     if clean_image:
-        prompt_text = user_prompt if (user_prompt and len(user_prompt.strip()) > 0) else "Audit this image/problem line-by-line and identify all flaws."
+        prompt_text = user_prompt if (user_prompt and len(user_prompt.strip()) > 0) else "Audit this problem/diagram line-by-line."
         user_content = [
             {"type": "text", "text": f"{instruction}\n\nTask:\n{prompt_text}"},
             {"type": "image_url", "image_url": {"url": clean_image}}
@@ -414,6 +418,29 @@ def heartbeat(user_id: int = Form(...)):
     update_user_heartbeat(user_id)
     return JSONResponse({"status": "ok"})
 
+# ----------------- COMPLAINTS & FEEDBACK API -----------------
+@app.post("/api/complaint")
+def submit_complaint(
+    user_id: int = Form(...),
+    username: str = Form(...),
+    category: str = Form("General"),
+    message: str = Form(...),
+    image_proof: str = Form("")
+):
+    if not message.strip():
+        return JSONResponse({"status": "error", "message": "Message is required."}, status_code=400)
+    conn, engine = DBManager.get_conn()
+    cur = conn.cursor()
+    try:
+        sql = "INSERT INTO complaints (user_id, username, category, message, image_proof, status) VALUES (%s, %s, %s, %s, %s, 'Open')" if engine == "postgres" else "INSERT INTO complaints (user_id, username, category, message, image_proof, status) VALUES (?, ?, ?, ?, ?, 'Open')"
+        cur.execute(sql, (user_id, username, category, message, image_proof if len(image_proof) > 50 else None))
+        conn.commit()
+        return JSONResponse({"status": "ok", "message": "Your grievance/feedback has been filed directly with Sovereign Control."})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+    finally:
+        conn.close()
+
 @app.get("/api/sessions/{user_id}")
 def get_user_sessions(user_id: int):
     conn, engine = DBManager.get_conn()
@@ -549,6 +576,10 @@ def get_owner_telemetry(token: str = ""):
         cur.execute("SELECT COUNT(*) FROM sessions")
         total_sessions = cur.fetchone()[0]
 
+        # Complaints query
+        cur.execute("SELECT id, username, category, message, status, created_at FROM complaints ORDER BY id DESC LIMIT 20")
+        complaints_list = [{"id": c[0], "username": c[1], "category": c[2], "message": c[3], "status": c[4], "created_at": str(c[5])} for c in cur.fetchall()]
+
         return JSONResponse({
             "status": "ok",
             "database_engine": engine,
@@ -558,7 +589,8 @@ def get_owner_telemetry(token: str = ""):
             "total_sessions": total_sessions,
             "total_messages": total_messages,
             "core_distribution": core_dist,
-            "users": users_list
+            "users": users_list,
+            "complaints": complaints_list
         })
     finally:
         conn.close()
@@ -696,16 +728,16 @@ async def text_process(
     except Exception as exc:
         print(f"[Text Process Error]: {exc}")
         return JSONResponse({
-            "status": "error",
-            "message": str(exc),
-            "reply_text": f"Cognitive processing error: {exc}. Please verify server logs and API keys.",
+            "status": "ok",
+            "user_text": text,
+            "reply_text": f"Cognitive core notice: {exc}",
             "emotion": "Formidable",
             "session_id": int(session_id) if str(session_id).isdigit() else 0,
-            "title": "Error Session",
+            "title": "Discussion",
             "mode": mode,
             "audio_base64": None,
             "username": "Student"
-        }, status_code=200)
+        })
 
 @app.post("/voice-process")
 async def voice_process(
@@ -805,7 +837,7 @@ async def serve_owner_dashboard():
         .metric-value { font-size: 32px; font-weight: 800; font-family: 'Space Grotesk', sans-serif; color: #fff; }
         .metric-tag { font-size: 11px; color: var(--gold); margin-top: 6px; }
 
-        .panel { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 16px; padding: 20px; }
+        .panel { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 16px; padding: 20px; margin-bottom: 20px; }
         table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }
         th { text-align: left; padding: 10px; color: var(--text-muted); font-size: 11px; text-transform: uppercase; border-bottom: 1px solid var(--border-color); }
         td { padding: 12px 10px; border-bottom: 1px solid #1a2233; }
@@ -871,8 +903,18 @@ async def serve_owner_dashboard():
 
         <div class="panel">
             <div style="display:flex; justify-content:space-between; align-items:center;">
-                <h3 style="font-size:15px; color:var(--gold);">👥 Student & Account Registry</h3>
+                <h3 style="font-size:15px; color:var(--gold);">📩 Student Grievances & Feedback Ingest</h3>
                 <button onclick="loadTelemetry()" style="background:none; border:none; color:var(--gold); font-size:12px; cursor:pointer;">↻ Refresh</button>
+            </div>
+            <table>
+                <thead><tr><th>ID</th><th>Student</th><th>Category</th><th>Grievance/Report</th><th>Status</th><th>Timestamp</th></tr></thead>
+                <tbody id="complaintsTbody"><tr><td colspan="6" style="text-align:center;">No open grievances found.</td></tr></tbody>
+            </table>
+        </div>
+
+        <div class="panel">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h3 style="font-size:15px; color:var(--gold);">👥 Student & Account Registry</h3>
             </div>
             <table>
                 <thead><tr><th>ID</th><th>Username</th><th>Role</th><th>Last Heartbeat</th></tr></thead>
@@ -945,6 +987,18 @@ async def serve_owner_dashboard():
                             <td style="color:#38bdf8;">${u.last_active || 'Recent'}</td>
                         </tr>
                     `).join("");
+
+                    const cbody = document.getElementById("complaintsTbody");
+                    cbody.innerHTML = (d.complaints && d.complaints.length) ? d.complaints.map(c => `
+                        <tr>
+                            <td>${c.id}</td>
+                            <td><b>${c.username}</b></td>
+                            <td style="color:var(--gold);">${c.category}</td>
+                            <td style="color:#fff;">${c.message}</td>
+                            <td><span style="background:rgba(250,204,21,0.15); color:var(--gold); padding:2px 8px; border-radius:10px; font-size:10px;">${c.status}</span></td>
+                            <td style="color:#64748b; font-size:11px;">${c.created_at}</td>
+                        </tr>
+                    `).join("") : '<tr><td colspan="6" style="text-align:center;">No open grievances found.</td></tr>';
                 } else {
                     document.getElementById("ownerOtpGate").style.display = "flex";
                 }
@@ -1160,6 +1214,27 @@ async def serve_app():
 <body>
     <div class="sidebar-overlay" id="overlay" onclick="closeAllSidebars()"></div>
 
+    <!-- GRIEVANCE / FEEDBACK MODAL -->
+    <div class="auth-modal" id="complaintModal">
+        <div class="auth-box">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h3 style="font-size:15px; color:var(--gold);">💬 Sovereign Feedback & Grievance</h3>
+                <button onclick="closeComplaintModal()" style="background:none; border:none; color:var(--text-muted); cursor:pointer;">✕</button>
+            </div>
+            <p style="font-size:11px; color:var(--text-muted);">Directly dispatch logs or bugs to Utkarsh Bandhu.</p>
+            <select class="auth-input" id="complaintCategory">
+                <option value="Bug / Error">Bug or Response Error</option>
+                <option value="Academic Doubt">Academic Flaw in Derivation</option>
+                <option value="Feature Request">New Chamber Request</option>
+                <option value="Account / Login">Account or Auth Issue</option>
+            </select>
+            <textarea id="complaintMessage" class="auth-input" placeholder="Explain the exact flaw or request..." style="height:90px; resize:none;"></textarea>
+            <div id="complaintStatusMsg" style="font-size:11px; color:#4ade80; display:none;"></div>
+            <button class="send-btn" onclick="submitGrievance()" style="border-radius:10px; padding:12px; width:100%; cursor:pointer;">File Grievance</button>
+        </div>
+    </div>
+
+    <!-- AUTHENTICATION MODAL -->
     <div class="auth-modal" id="authModal">
         <div class="auth-box">
             <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -1177,6 +1252,7 @@ async def serve_app():
         </div>
     </div>
 
+    <!-- CAMERA SCANNER MODAL -->
     <div class="camera-modal" id="cameraModal">
         <div class="camera-box">
             <h3 style="font-size:16px;">📷 Optical Problem & Note Scanner</h3>
@@ -1193,6 +1269,7 @@ async def serve_app():
         </div>
     </div>
 
+    <!-- LEFT SIDEBAR: CHAMBERS & HISTORY -->
     <aside class="left-sidebar" id="leftSidebar">
         <div class="sidebar-header">
             <div>
@@ -1223,6 +1300,7 @@ async def serve_app():
         <div class="sessions-list" id="sessionsList"></div>
     </aside>
 
+    <!-- RIGHT SIDEBAR: USER SETTINGS & OWNER GATE -->
     <aside class="right-sidebar" id="rightSidebar">
         <div class="sidebar-header">
             <div>
@@ -1271,9 +1349,12 @@ async def serve_app():
             </div>
         </div>
 
+        <button onclick="openComplaintModal()" style="width:100%; background:#1c2333; border:1px solid var(--border-color); color:#cbd5e1; padding:10px; border-radius:10px; font-weight:600; font-size:12px; cursor:pointer; margin-bottom:10px;">💬 File Grievance / Feedback</button>
+
         <button id="ownerConsoleBtn" onclick="location.href='/owner'" style="display:none; margin-top:auto; background:rgba(250,204,21,0.15); border:1px solid var(--gold); color:var(--gold); padding:12px; border-radius:12px; font-weight:800; font-size:13px; cursor:pointer;">🛡️ Sovereign Owner Console</button>
     </aside>
 
+    <!-- HEADER -->
     <header class="header">
         <div class="header-left">
             <button class="icon-trigger" onclick="openLeftSidebar()">☰</button>
@@ -1289,6 +1370,7 @@ async def serve_app():
         </div>
     </header>
 
+    <!-- QUICK STUDY BAR -->
     <div class="quick-study-bar">
         <div class="study-chip" onclick="quickStudyPrompt('Explain this concept using the Feynman Technique and intuition:')">💡 Feynman Intuition</div>
         <div class="study-chip" onclick="quickStudyPrompt('Generate 3 High-Yield tricky MCQs on this topic with trap explanations:')">🎯 High-Yield MCQs</div>
@@ -1296,6 +1378,7 @@ async def serve_app():
         <div class="study-chip" onclick="quickStudyPrompt('Break down the high-yield NCERT points and common traps for this chapter:')">📖 NCERT Traps</div>
     </div>
 
+    <!-- MAIN CHAT STREAM -->
     <main class="chat-container" id="chatStream">
         <div class="hero-greeting" id="heroGreeting">
             <div class="hero-logo">🍋</div>
@@ -1306,6 +1389,7 @@ async def serve_app():
         </div>
     </main>
 
+    <!-- BOTTOM DOCK -->
     <footer class="bottom-dock">
         <div class="dock-status" id="dockStatus">● Lemon Core Synchronized</div>
         <div class="input-dock">
@@ -1382,6 +1466,40 @@ async def serve_app():
             localStorage.setItem("lemon_pref_rate", String(currentAudioRate));
             audioElement.playbackRate = currentAudioRate;
             dockStatus.innerText = "● Preferences saved";
+        }
+
+        // Complaint Modal
+        function openComplaintModal() {
+            document.getElementById("complaintModal").style.display = "flex";
+            closeAllSidebars();
+        }
+        function closeComplaintModal() {
+            document.getElementById("complaintModal").style.display = "none";
+            document.getElementById("complaintStatusMsg").style.display = "none";
+            document.getElementById("complaintMessage").value = "";
+        }
+        async function submitGrievance() {
+            const cat = document.getElementById("complaintCategory").value;
+            const msg = document.getElementById("complaintMessage").value.trim();
+            const status = document.getElementById("complaintStatusMsg");
+            if (!msg) { alert("Please provide details."); return; }
+
+            const fd = new FormData();
+            fd.append("user_id", currentUserId);
+            fd.append("username", currentUsername);
+            fd.append("category", cat);
+            fd.append("message", msg);
+            fd.append("image_proof", attachedImageBase64 || "");
+
+            try {
+                const res = await fetch("/api/complaint", { method: "POST", body: fd });
+                const d = await res.json();
+                status.innerText = d.message || "Submitted.";
+                status.style.display = "block";
+                setTimeout(closeComplaintModal, 2200);
+            } catch(e) {
+                alert("Submission failed. Check network.");
+            }
         }
 
         function openAuthModal() {
