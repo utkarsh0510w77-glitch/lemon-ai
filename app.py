@@ -15,7 +15,7 @@ from typing import Optional
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import FastAPI, File, Form, UploadFile, BackgroundTasks
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from groq import Groq
@@ -133,7 +133,7 @@ def init_db():
                 CREATE TABLE IF NOT EXISTS announcements (id SERIAL PRIMARY KEY, message TEXT NOT NULL, is_active BOOLEAN DEFAULT TRUE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
                 CREATE TABLE IF NOT EXISTS sessions (id SERIAL PRIMARY KEY, user_id INT NOT NULL, title VARCHAR(255) NOT NULL, core_mode VARCHAR(50) DEFAULT 'study', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
                 CREATE TABLE IF NOT EXISTS messages (id SERIAL PRIMARY KEY, session_id INT NOT NULL, role VARCHAR(50) NOT NULL, content TEXT NOT NULL, mode VARCHAR(50) NOT NULL, emotion VARCHAR(100), image_data TEXT, timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
-                CREATE TABLE IF NOT EXISTS complaints (id SERIAL PRIMARY KEY, user_id INT NOT NULL, username VARCHAR(255) NOT NULL, category VARCHAR(100) NOT NULL, message TEXT NOT NULL, image_proof TEXT, status VARCHAR(50) DEFAULT 'Open', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+                CREATE TABLE IF NOT EXISTS complaints (id SERIAL PRIMARY KEY, user_id INT NOT NULL, username VARCHAR(255) NOT NULL, category VARCHAR(100) NOT NULL, message TEXT NOT NULL, image_proof TEXT, status VARCHAR(50) DEFAULT 'Processing', ai_diagnosis TEXT, resolution TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
             """)
             conn.commit()
         else:
@@ -144,9 +144,21 @@ def init_db():
                 CREATE TABLE IF NOT EXISTS announcements (id INTEGER PRIMARY KEY AUTOINCREMENT, message TEXT NOT NULL, is_active INTEGER DEFAULT 1, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
                 CREATE TABLE IF NOT EXISTS sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, title TEXT NOT NULL, core_mode TEXT NOT NULL DEFAULT 'study', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
                 CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id INTEGER NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, mode TEXT NOT NULL, emotion TEXT, image_data TEXT, timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
-                CREATE TABLE IF NOT EXISTS complaints (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, username TEXT NOT NULL, category TEXT NOT NULL, message TEXT NOT NULL, image_proof TEXT, status TEXT DEFAULT 'Open', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+                CREATE TABLE IF NOT EXISTS complaints (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, username TEXT NOT NULL, category TEXT NOT NULL, message TEXT NOT NULL, image_proof TEXT, status TEXT DEFAULT 'Processing', ai_diagnosis TEXT, resolution TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
             """)
             conn.commit()
+
+        # Schema migration check
+        try:
+            if engine == "postgres":
+                cur.execute("ALTER TABLE complaints ADD COLUMN IF NOT EXISTS ai_diagnosis TEXT;")
+                cur.execute("ALTER TABLE complaints ADD COLUMN IF NOT EXISTS resolution TEXT;")
+            else:
+                cur.execute("ALTER TABLE complaints ADD COLUMN ai_diagnosis TEXT;")
+                cur.execute("ALTER TABLE complaints ADD COLUMN resolution TEXT;")
+            conn.commit()
+        except Exception:
+            pass
     finally:
         conn.close()
 
@@ -307,6 +319,100 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
 
     return f"Cognitive synthesis paused. Check your Groq key. Details: {last_error}", "Serene"
 
+# =====================================================================
+# 🤖 AUTONOMOUS MULTI-AGENT COMPLAINT & FEEDBACK ENGINE
+# =====================================================================
+def autonomous_grievance_engine(complaint_id: int, user_id: int, username: str, category: str, message: str):
+    """
+    Self-working multi-agent pipeline:
+    Agent 1 (Triage) -> Agent 2 (DevOps Glitch Doctor) OR Agent 3 (Academic Resolver) OR Agent 4 (Owner Feature Gatekeeper)
+    """
+    if client is None or not GROQ_API_KEY:
+        print("[Autonomous Grievance]: Client offline.")
+        return
+
+    diagnosis = "Triage completed."
+    resolution = "Logged directly for review."
+    final_status = "Auto-Resolved"
+
+    try:
+        # AGENT 1: Triage and intent classifier
+        triage_system = (
+            "You are Lemon AI Chief Sentinel. Classify this student grievance into exactly one of three routing tags:\n"
+            "1. [CODE_GLITCH]: Technical bugs, UI crashes, broken buttons, voice/audio failure, deployment/database errors.\n"
+            "2. [ACADEMIC_ISSUE]: Physics/Chemistry/Biology concept flaw, formula question, NCERT contradiction, calculation error.\n"
+            "3. [FEATURE_REQUEST]: User requests a new chamber, custom design, new setting, or new capability.\n"
+            "Respond in JSON format: {\"routing\": \"<TAG>\", \"summary\": \"<Concise 1-sentence analysis>\"}"
+        )
+        triage_res = client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": triage_system},
+                {"role": "user", "content": f"Category: {category}\nMessage: {message}"}
+            ],
+            model="llama-3.3-70b-versatile",
+            temperature=0.1,
+            response_format={"type": "json_object"}
+        )
+        triage_data = json.loads(triage_res.choices[0].message.content)
+        routing = triage_data.get("routing", "[CODE_GLITCH]")
+        diagnosis = triage_data.get("summary", "Processed through automated triage.")
+
+        # AGENT 2: Code Glitch Doctor
+        if "CODE_GLITCH" in routing:
+            devops_system = (
+                "You are Lemon AI Chief System Engineer. A technical bug was reported. "
+                "Diagnose the failure mode and provide an immediate technical resolution or diagnosis for Commander Utkarsh Bandhu. "
+                "Keep it razor-sharp and actionable."
+            )
+            devops_res = client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": devops_system},
+                    {"role": "user", "content": f"Grievance: {message}\nDiagnosis: {diagnosis}"}
+                ],
+                model="llama-3.3-70b-versatile",
+                temperature=0.2
+            )
+            resolution = devops_res.choices[0].message.content.strip()
+            final_status = "Auto-Resolved (Patch Ready)"
+
+        # AGENT 3: Academic & Derivation Specialist
+        elif "ACADEMIC_ISSUE" in routing:
+            academic_system = (
+                "You are the Sovereign Socratic Academic Auditor for NEET/JEE. "
+                "Solve the doubt or conceptual error reported by the student with first-principles derivation and NCERT clarity. "
+                "Provide the complete verified resolution directly."
+            )
+            academic_res = client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": academic_system},
+                    {"role": "user", "content": f"Student Question/Complaint: {message}"}
+                ],
+                model="llama-3.3-70b-versatile",
+                temperature=0.2
+            )
+            resolution = academic_res.choices[0].message.content.strip()
+            final_status = "Auto-Resolved (Academic)"
+
+        # AGENT 4: Feature Gatekeeper (Only asks owner Utkarsh)
+        else:
+            final_status = "Needs Owner Approval"
+            resolution = "New capability requested. Routed to Commander Utkarsh Bandhu for executive review."
+
+        # Database update with full autonomous findings
+        conn, engine = DBManager.get_conn()
+        cur = conn.cursor()
+        try:
+            sql = "UPDATE complaints SET status = %s, ai_diagnosis = %s, resolution = %s WHERE id = %s" if engine == "postgres" else "UPDATE complaints SET status = ?, ai_diagnosis = ?, resolution = ? WHERE id = ?"
+            cur.execute(sql, (final_status, diagnosis, resolution, complaint_id))
+            conn.commit()
+            print(f"[Autonomous Sentinel]: Ticket #{complaint_id} processed -> {final_status}")
+        finally:
+            conn.close()
+
+    except Exception as exc:
+        print(f"[Autonomous Grievance Error]: {exc}")
+
+# ----------------- OWNER OTP AUTHENTICATION APIS -----------------
 @app.post("/api/owner/request-otp")
 def request_owner_otp(email: str = Form(...)):
     email_clean = email.strip().lower()
@@ -418,8 +524,10 @@ def heartbeat(user_id: int = Form(...)):
     update_user_heartbeat(user_id)
     return JSONResponse({"status": "ok"})
 
+# ----------------- RE-ENGINEERED COMPLAINT & FEEDBACK API -----------------
 @app.post("/api/complaint")
 def submit_complaint(
+    background_tasks: BackgroundTasks,
     user_id: int = Form(...),
     username: str = Form(...),
     category: str = Form("General"),
@@ -431,10 +539,23 @@ def submit_complaint(
     conn, engine = DBManager.get_conn()
     cur = conn.cursor()
     try:
-        sql = "INSERT INTO complaints (user_id, username, category, message, image_proof, status) VALUES (%s, %s, %s, %s, %s, 'Open')" if engine == "postgres" else "INSERT INTO complaints (user_id, username, category, message, image_proof, status) VALUES (?, ?, ?, ?, ?, 'Open')"
-        cur.execute(sql, (user_id, username, category, message, image_proof if len(image_proof) > 50 else None))
+        if engine == "postgres":
+            sql = "INSERT INTO complaints (user_id, username, category, message, image_proof, status) VALUES (%s, %s, %s, %s, %s, 'Processing') RETURNING id"
+            cur.execute(sql, (user_id, username, category, message, image_proof if len(image_proof) > 50 else None))
+            complaint_id = cur.fetchone()[0]
+        else:
+            sql = "INSERT INTO complaints (user_id, username, category, message, image_proof, status) VALUES (?, ?, ?, ?, ?, 'Processing')"
+            cur.execute(sql, (user_id, username, category, message, image_proof if len(image_proof) > 50 else None))
+            complaint_id = cur.lastrowid
         conn.commit()
-        return JSONResponse({"status": "ok", "message": "Your grievance/feedback has been filed directly with Sovereign Control."})
+
+        # Fire autonomous multi-agent resolution in background
+        background_tasks.add_task(autonomous_grievance_engine, complaint_id, user_id, username, category, message)
+
+        return JSONResponse({
+            "status": "ok",
+            "message": "⚡ Grievance ticket created. Autonomous AI Agents are currently diagnosing and treating your issue in real-time."
+        })
     except Exception as e:
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
     finally:
@@ -575,8 +696,20 @@ def get_owner_telemetry(token: str = ""):
         cur.execute("SELECT COUNT(*) FROM sessions")
         total_sessions = cur.fetchone()[0]
 
-        cur.execute("SELECT id, username, category, message, status, created_at FROM complaints ORDER BY id DESC LIMIT 20")
-        complaints_list = [{"id": c[0], "username": c[1], "category": c[2], "message": c[3], "status": c[4], "created_at": str(c[5])} for c in cur.fetchall()]
+        # Multi-Agent resolved complaints query
+        cur.execute("SELECT id, username, category, message, status, ai_diagnosis, resolution, created_at FROM complaints ORDER BY id DESC LIMIT 25")
+        complaints_list = [
+            {
+                "id": c[0],
+                "username": c[1],
+                "category": c[2],
+                "message": c[3],
+                "status": c[4],
+                "ai_diagnosis": c[5] or "Pending diagnosis",
+                "resolution": c[6] or "In autonomous pipeline",
+                "created_at": str(c[7])
+            } for c in cur.fetchall()
+        ]
 
         return JSONResponse({
             "status": "ok",
@@ -828,7 +961,7 @@ async def serve_owner_dashboard():
         .brand { display: flex; align-items: center; gap: 12px; }
         .brand-badge { width: 40px; height: 40px; background: var(--gold); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
 
-        .container { padding: 24px; max-width: 1200px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+        .container { padding: 24px; max-width: 1240px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
         .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
         .metric-card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 16px; padding: 20px; }
         .metric-title { font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 700; letter-spacing: 1px; margin-bottom: 6px; }
@@ -838,7 +971,7 @@ async def serve_owner_dashboard():
         .panel { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 16px; padding: 20px; margin-bottom: 20px; }
         table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }
         th { text-align: left; padding: 10px; color: var(--text-muted); font-size: 11px; text-transform: uppercase; border-bottom: 1px solid var(--border-color); }
-        td { padding: 12px 10px; border-bottom: 1px solid #1a2233; }
+        td { padding: 12px 10px; border-bottom: 1px solid #1a2233; vertical-align: top; }
 
         .otp-modal { position: fixed; inset: 0; background: rgba(5, 7, 12, 0.98); backdrop-filter: blur(20px); display: flex; align-items: center; justify-content: center; z-index: 500; }
         .otp-box { background: #111622; border: 1px solid var(--gold); border-radius: 20px; padding: 32px; width: 90%; max-width: 420px; text-align: center; }
@@ -901,12 +1034,15 @@ async def serve_owner_dashboard():
 
         <div class="panel">
             <div style="display:flex; justify-content:space-between; align-items:center;">
-                <h3 style="font-size:15px; color:var(--gold);">📩 Student Grievances & Feedback Ingest</h3>
+                <div>
+                    <h3 style="font-size:15px; color:var(--gold);">🤖 Autonomous Multi-Agent Grievance & Patch Ingest</h3>
+                    <div style="font-size:11px; color:var(--text-muted);">AI Glitch Doctor & Academic Resolvers treat problems automatically; Feature requests require your review.</div>
+                </div>
                 <button onclick="loadTelemetry()" style="background:none; border:none; color:var(--gold); font-size:12px; cursor:pointer;">↻ Refresh</button>
             </div>
             <table>
-                <thead><tr><th>ID</th><th>Student</th><th>Category</th><th>Grievance/Report</th><th>Status</th><th>Timestamp</th></tr></thead>
-                <tbody id="complaintsTbody"><tr><td colspan="6" style="text-align:center;">No open grievances found.</td></tr></tbody>
+                <thead><tr><th>Ticket</th><th>Student</th><th>Category</th><th>Issue</th><th>Agent Diagnosis</th><th>Autonomous Action / Patch</th><th>Status</th></tr></thead>
+                <tbody id="complaintsTbody"><tr><td colspan="7" style="text-align:center;">No open grievances found.</td></tr></tbody>
             </table>
         </div>
 
@@ -989,14 +1125,15 @@ async def serve_owner_dashboard():
                     const cbody = document.getElementById("complaintsTbody");
                     cbody.innerHTML = (d.complaints && d.complaints.length) ? d.complaints.map(c => `
                         <tr>
-                            <td>${c.id}</td>
+                            <td><b>#${c.id}</b></td>
                             <td><b>${c.username}</b></td>
-                            <td style="color:var(--gold);">${c.category}</td>
-                            <td style="color:#fff;">${c.message}</td>
-                            <td><span style="background:rgba(250,204,21,0.15); color:var(--gold); padding:2px 8px; border-radius:10px; font-size:10px;">${c.status}</span></td>
-                            <td style="color:#64748b; font-size:11px;">${c.created_at}</td>
+                            <td style="color:var(--gold); font-weight:700;">${c.category}</td>
+                            <td style="color:#cbd5e1; max-width:200px;">${c.message}</td>
+                            <td style="color:#38bdf8; font-size:12px; max-width:200px;">${c.ai_diagnosis}</td>
+                            <td style="color:#4ade80; font-size:12px; max-width:240px; white-space:pre-wrap;">${c.resolution}</td>
+                            <td><span style="background:${c.status.includes('Auto') ? 'rgba(74,222,128,0.15)' : 'rgba(250,204,21,0.15)'}; color:${c.status.includes('Auto') ? '#4ade80' : 'var(--gold)'}; padding:4px 8px; border-radius:10px; font-size:10px; font-weight:700;">${c.status}</span></td>
                         </tr>
-                    `).join("") : '<tr><td colspan="6" style="text-align:center;">No open grievances found.</td></tr>';
+                    `).join("") : '<tr><td colspan="7" style="text-align:center;">No open grievances found.</td></tr>';
                 } else {
                     document.getElementById("ownerOtpGate").style.display = "flex";
                 }
@@ -1157,7 +1294,6 @@ async def serve_app():
 
         .chat-img-thumb { max-width: 240px; border-radius: 12px; margin-bottom: 10px; border: 1px solid var(--border-color); }
 
-        /* Thinking Indicator */
         .thinking-bubble {
             display: flex; align-items: center; gap: 10px; padding: 12px 18px;
             background: #101624; border: 1px dashed var(--gold); border-radius: 18px;
@@ -1175,7 +1311,7 @@ async def serve_app():
         }
         .auth-box {
             background: var(--bg-surface); border: 1px solid var(--gold); border-radius: 20px;
-            padding: 28px; width: 100%; max-width: 380px; display: flex; flex-direction: column; gap: 14px;
+            padding: 28px; width: 100%; max-width: 400px; display: flex; flex-direction: column; gap: 14px;
         }
         .auth-tabs { display: flex; gap: 10px; margin-bottom: 8px; }
         .auth-tab { flex: 1; padding: 8px; text-align: center; border-radius: 8px; font-size: 12px; font-weight: 700; cursor: pointer; background: var(--card-surface); color: var(--text-muted); }
@@ -1224,23 +1360,23 @@ async def serve_app():
 <body>
     <div class="sidebar-overlay" id="overlay" onclick="closeAllSidebars()"></div>
 
-    <!-- GRIEVANCE / FEEDBACK MODAL -->
+    <!-- AUTONOMOUS GRIEVANCE / FEEDBACK MODAL -->
     <div class="auth-modal" id="complaintModal">
         <div class="auth-box">
             <div style="display:flex; justify-content:space-between; align-items:center;">
-                <h3 style="font-size:15px; color:var(--gold);">💬 Sovereign Feedback & Grievance</h3>
+                <h3 style="font-size:15px; color:var(--gold);">💬 Sovereign Multi-Agent Ingest</h3>
                 <button onclick="closeComplaintModal()" style="background:none; border:none; color:var(--text-muted); cursor:pointer;">✕</button>
             </div>
-            <p style="font-size:11px; color:var(--text-muted);">Directly dispatch logs or bugs to Utkarsh Bandhu.</p>
+            <p style="font-size:11px; color:var(--text-muted);">Self-working triage diagnoses glitches and academic flaws in real time.</p>
             <select class="auth-input" id="complaintCategory">
-                <option value="Bug / Error">Bug or Response Error</option>
-                <option value="Academic Doubt">Academic Flaw in Derivation</option>
-                <option value="Feature Request">New Chamber Request</option>
-                <option value="Account / Login">Account or Auth Issue</option>
+                <option value="Bug / Error">Technical Bug / Code Glitch</option>
+                <option value="Academic Doubt">Academic Derivation / Formula Flaw</option>
+                <option value="Feature Request">Request New Feature / Chamber</option>
+                <option value="Account / Login">Account / Session Issue</option>
             </select>
-            <textarea id="complaintMessage" class="auth-input" placeholder="Explain the exact flaw or request..." style="height:90px; resize:none;"></textarea>
-            <div id="complaintStatusMsg" style="font-size:11px; color:#4ade80; display:none;"></div>
-            <button class="send-btn" onclick="submitGrievance()" style="border-radius:10px; padding:12px; width:100%; cursor:pointer;">File Grievance</button>
+            <textarea id="complaintMessage" class="auth-input" placeholder="Describe the glitch, derivation flaw, or idea..." style="height:90px; resize:none;"></textarea>
+            <div id="complaintStatusMsg" style="font-size:11px; color:#4ade80; display:none; line-height:1.4;"></div>
+            <button class="send-btn" id="complaintSubmitBtn" onclick="submitGrievance()" style="border-radius:10px; padding:12px; width:100%; cursor:pointer;">Dispatch to Autonomous Sentinel</button>
         </div>
     </div>
 
@@ -1502,11 +1638,16 @@ async def serve_app():
             document.getElementById("complaintStatusMsg").style.display = "none";
             document.getElementById("complaintMessage").value = "";
         }
+
         async function submitGrievance() {
             const cat = document.getElementById("complaintCategory").value;
             const msg = document.getElementById("complaintMessage").value.trim();
             const status = document.getElementById("complaintStatusMsg");
+            const btn = document.getElementById("complaintSubmitBtn");
             if (!msg) { alert("Please provide details."); return; }
+
+            btn.disabled = true;
+            btn.innerText = "Engaging Autonomous Agents...";
 
             const fd = new FormData();
             fd.append("user_id", currentUserId);
@@ -1518,11 +1659,17 @@ async def serve_app():
             try {
                 const res = await fetch("/api/complaint", { method: "POST", body: fd });
                 const d = await res.json();
-                status.innerText = d.message || "Submitted.";
+                status.innerText = d.message || "Ticket dispatched.";
                 status.style.display = "block";
-                setTimeout(closeComplaintModal, 2200);
+                setTimeout(() => {
+                    closeComplaintModal();
+                    btn.disabled = false;
+                    btn.innerText = "Dispatch to Autonomous Sentinel";
+                }, 3000);
             } catch(e) {
                 alert("Submission failed. Check network.");
+                btn.disabled = false;
+                btn.innerText = "Dispatch to Autonomous Sentinel";
             }
         }
 
