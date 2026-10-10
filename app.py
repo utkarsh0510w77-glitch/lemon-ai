@@ -418,7 +418,6 @@ def heartbeat(user_id: int = Form(...)):
     update_user_heartbeat(user_id)
     return JSONResponse({"status": "ok"})
 
-# ----------------- COMPLAINTS & FEEDBACK API -----------------
 @app.post("/api/complaint")
 def submit_complaint(
     user_id: int = Form(...),
@@ -576,7 +575,6 @@ def get_owner_telemetry(token: str = ""):
         cur.execute("SELECT COUNT(*) FROM sessions")
         total_sessions = cur.fetchone()[0]
 
-        # Complaints query
         cur.execute("SELECT id, username, category, message, status, created_at FROM complaints ORDER BY id DESC LIMIT 20")
         complaints_list = [{"id": c[0], "username": c[1], "category": c[2], "message": c[3], "status": c[4], "created_at": str(c[5])} for c in cur.fetchall()]
 
@@ -1214,7 +1212,6 @@ async def serve_app():
 <body>
     <div class="sidebar-overlay" id="overlay" onclick="closeAllSidebars()"></div>
 
-    <!-- GRIEVANCE / FEEDBACK MODAL -->
     <div class="auth-modal" id="complaintModal">
         <div class="auth-box">
             <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -1234,7 +1231,6 @@ async def serve_app():
         </div>
     </div>
 
-    <!-- AUTHENTICATION MODAL -->
     <div class="auth-modal" id="authModal">
         <div class="auth-box">
             <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -1252,7 +1248,6 @@ async def serve_app():
         </div>
     </div>
 
-    <!-- CAMERA SCANNER MODAL -->
     <div class="camera-modal" id="cameraModal">
         <div class="camera-box">
             <h3 style="font-size:16px;">📷 Optical Problem & Note Scanner</h3>
@@ -1269,7 +1264,6 @@ async def serve_app():
         </div>
     </div>
 
-    <!-- LEFT SIDEBAR: CHAMBERS & HISTORY -->
     <aside class="left-sidebar" id="leftSidebar">
         <div class="sidebar-header">
             <div>
@@ -1300,7 +1294,6 @@ async def serve_app():
         <div class="sessions-list" id="sessionsList"></div>
     </aside>
 
-    <!-- RIGHT SIDEBAR: USER SETTINGS & OWNER GATE -->
     <aside class="right-sidebar" id="rightSidebar">
         <div class="sidebar-header">
             <div>
@@ -1354,7 +1347,6 @@ async def serve_app():
         <button id="ownerConsoleBtn" onclick="location.href='/owner'" style="display:none; margin-top:auto; background:rgba(250,204,21,0.15); border:1px solid var(--gold); color:var(--gold); padding:12px; border-radius:12px; font-weight:800; font-size:13px; cursor:pointer;">🛡️ Sovereign Owner Console</button>
     </aside>
 
-    <!-- HEADER -->
     <header class="header">
         <div class="header-left">
             <button class="icon-trigger" onclick="openLeftSidebar()">☰</button>
@@ -1370,7 +1362,6 @@ async def serve_app():
         </div>
     </header>
 
-    <!-- QUICK STUDY BAR -->
     <div class="quick-study-bar">
         <div class="study-chip" onclick="quickStudyPrompt('Explain this concept using the Feynman Technique and intuition:')">💡 Feynman Intuition</div>
         <div class="study-chip" onclick="quickStudyPrompt('Generate 3 High-Yield tricky MCQs on this topic with trap explanations:')">🎯 High-Yield MCQs</div>
@@ -1378,7 +1369,6 @@ async def serve_app():
         <div class="study-chip" onclick="quickStudyPrompt('Break down the high-yield NCERT points and common traps for this chapter:')">📖 NCERT Traps</div>
     </div>
 
-    <!-- MAIN CHAT STREAM -->
     <main class="chat-container" id="chatStream">
         <div class="hero-greeting" id="heroGreeting">
             <div class="hero-logo">🍋</div>
@@ -1389,7 +1379,6 @@ async def serve_app():
         </div>
     </main>
 
-    <!-- BOTTOM DOCK -->
     <footer class="bottom-dock">
         <div class="dock-status" id="dockStatus">● Lemon Core Synchronized</div>
         <div class="input-dock">
@@ -1468,7 +1457,6 @@ async def serve_app():
             dockStatus.innerText = "● Preferences saved";
         }
 
-        // Complaint Modal
         function openComplaintModal() {
             document.getElementById("complaintModal").style.display = "flex";
             closeAllSidebars();
@@ -1605,16 +1593,27 @@ async def serve_app():
                     list.appendChild(empty);
                 }
             } catch (error) {
-                list.textContent = "Unable to load session history.";
+                list.textContent = "Your saved transcripts appear here.";
             }
         }
 
         async function openSavedSession(sessionId) {
             try {
                 const response = await fetch(`/api/session-messages/${encodeURIComponent(sessionId)}`);
+                if (!response.ok) throw new Error("Session unavailable");
                 const data = await response.json();
-                chatStream.replaceChildren();
                 const messages = Array.isArray(data.messages) ? data.messages : [];
+                
+                if (messages.length === 0) {
+                    currentSessionId = Number(sessionId);
+                    localStorage.setItem("lemon_current_session_id", String(currentSessionId));
+                    chatStream.replaceChildren();
+                    document.getElementById("heroGreeting").style.display = "flex";
+                    dockStatus.innerText = "● Ready";
+                    return;
+                }
+
+                chatStream.replaceChildren();
                 messages.forEach(message => {
                     appendMessage(message.role === "assistant" ? "lemon" : "user", message.content, message.emotion, message.image_data);
                 });
@@ -1622,12 +1621,18 @@ async def serve_app():
                 localStorage.setItem("lemon_current_session_id", String(currentSessionId));
                 const latest = messages.slice().reverse().find(message => message.mode);
                 if (latest) switchDedicatedChamber(latest.mode, false);
-                document.getElementById("heroGreeting").style.display = messages.length ? "none" : "flex";
+                document.getElementById("heroGreeting").style.display = "none";
                 loadSessions();
                 closeAllSidebars();
                 dockStatus.innerText = "● Saved session loaded";
             } catch (error) {
-                dockStatus.innerText = "Could not load session.";
+                // Auto-recovery fallback for old deleted sessions
+                currentSessionId = 0;
+                localStorage.removeItem("lemon_current_session_id");
+                chatStream.replaceChildren();
+                document.getElementById("heroGreeting").style.display = "flex";
+                dockStatus.innerText = "● Ready";
+                loadSessions();
             }
         }
 
@@ -1908,8 +1913,12 @@ async def serve_app():
             closeAllSidebars();
         }
 
-        if (currentSessionId > 0) openSavedSession(currentSessionId);
-        else loadSessions();
+        // Safe Auto-Recovery Initializer
+        if (currentSessionId > 0) {
+            openSavedSession(currentSessionId);
+        } else {
+            loadSessions();
+        }
     </script>
 </body>
 </html>""")
