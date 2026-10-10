@@ -223,7 +223,7 @@ def generate_ai_title(prompt: str, core: str) -> str:
                 {"role": "system", "content": "Generate a concise 3-word title. Return ONLY text with no quotes."},
                 {"role": "user", "content": prompt}
             ],
-            model="llama-3.1-8b-instant",
+            model="llama-3.3-70b-versatile",
             max_tokens=20,
             temperature=0.3
         )
@@ -236,8 +236,8 @@ def generate_ai_title(prompt: str, core: str) -> str:
 def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_base64: str = None, lang_instruction: str = "") -> tuple[str, str]:
     if not GROQ_API_KEY or client is None:
         return (
-            "⚠️ **Groq API Key Unset on Cloud**: Lemon AI engine is running, but `GROQ_API_KEY` is not present in Render Environment variables. "
-            "Please add `GROQ_API_KEY` to Render Dashboard -> Environment. Database and local systems are fully active.",
+            "⚠️ **Groq API Key Missing**: Lemon AI is operational, but `GROQ_API_KEY` is not set in Render Environment variables. "
+            "Please go to your Render Dashboard -> Environment and add `GROQ_API_KEY` with your Groq API key.",
             "Formidable"
         )
     
@@ -255,7 +255,7 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
         clean_image = image_base64 if image_base64.startswith("data:image") else f"data:image/jpeg;base64,{image_base64}"
 
     if clean_image:
-        prompt_text = user_prompt if (user_prompt and len(user_prompt.strip()) > 0) else "Audit this problem/diagram line-by-line."
+        prompt_text = user_prompt if (user_prompt and len(user_prompt.strip()) > 0) else "Audit this problem line-by-line."
         user_content = [
             {"type": "text", "text": f"{instruction}\n\nTask:\n{prompt_text}"},
             {"type": "image_url", "image_url": {"url": clean_image}}
@@ -284,7 +284,7 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
     messages.append({"role": "user", "content": user_prompt})
 
     last_error = ""
-    for tm in ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]:
+    for tm in ["llama-3.3-70b-versatile", "llama3-8b-8192"]:
         try:
             chat = client.chat.completions.create(
                 messages=messages,
@@ -305,7 +305,7 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
             print(f"[Groq Error on {tm}]: {e}")
             continue
 
-    return f"Cognitive synthesis paused. Check your Groq key or quota. Detail: {last_error}", "Serene"
+    return f"Cognitive synthesis paused. Check your Groq key. Details: {last_error}", "Serene"
 
 @app.post("/api/owner/request-otp")
 def request_owner_otp(email: str = Form(...)):
@@ -1157,6 +1157,18 @@ async def serve_app():
 
         .chat-img-thumb { max-width: 240px; border-radius: 12px; margin-bottom: 10px; border: 1px solid var(--border-color); }
 
+        /* Thinking Indicator */
+        .thinking-bubble {
+            display: flex; align-items: center; gap: 10px; padding: 12px 18px;
+            background: #101624; border: 1px dashed var(--gold); border-radius: 18px;
+            font-size: 13px; color: var(--gold); align-self: flex-start; animation: pulse 1.6s infinite ease-in-out;
+        }
+        @keyframes pulse {
+            0% { opacity: 0.6; transform: scale(0.99); }
+            50% { opacity: 1; transform: scale(1); }
+            100% { opacity: 0.6; transform: scale(0.99); }
+        }
+
         .auth-modal {
             position: fixed; inset: 0; background: rgba(3, 5, 8, 0.95); backdrop-filter: blur(20px);
             z-index: 3000; display: none; align-items: center; justify-content: center; padding: 20px;
@@ -1705,6 +1717,21 @@ async def serve_app():
         audioElement.onplay = () => { stopBtn.style.display = "flex"; };
         audioElement.onended = () => { stopBtn.style.display = "none"; };
 
+        function showThinkingIndicator() {
+            removeThinkingIndicator();
+            const thinkDiv = document.createElement("div");
+            thinkDiv.id = "lemonThinkingIndicator";
+            thinkDiv.className = "thinking-bubble";
+            thinkDiv.innerHTML = `<span>🍋</span><span>Synthesizing first-principles derivation...</span>`;
+            chatStream.appendChild(thinkDiv);
+            chatStream.scrollTop = chatStream.scrollHeight;
+        }
+
+        function removeThinkingIndicator() {
+            const existing = document.getElementById("lemonThinkingIndicator");
+            if (existing) existing.remove();
+        }
+
         async function requestMicAndRecord() {
             const micBtn = document.getElementById("micBtn");
             if (mediaRecorder && mediaRecorder.state === "recording") {
@@ -1729,6 +1756,7 @@ async def serve_app():
                     const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || "audio/webm" });
                     if (!blob.size) { dockStatus.innerText = "No audio captured."; return; }
 
+                    showThinkingIndicator();
                     const fd = new FormData();
                     fd.append("file", blob, "voice.webm");
                     fd.append("user_id", currentUserId);
@@ -1739,6 +1767,7 @@ async def serve_app():
                     try {
                         const response = await fetch("/voice-process", { method: "POST", body: fd });
                         const result = await response.json();
+                        removeThinkingIndicator();
                         if (!response.ok) throw new Error(result.detail || result.message || "Voice request failed");
                         document.getElementById("heroGreeting").style.display = "none";
                         appendMessage("user", result.user_text || "[Voice message]", null);
@@ -1755,6 +1784,7 @@ async def serve_app():
                         }
                         dockStatus.innerText = "● Ready";
                     } catch (error) {
+                        removeThinkingIndicator();
                         dockStatus.innerText = "Voice processing error.";
                     }
                 };
@@ -1837,6 +1867,7 @@ async def serve_app():
             document.getElementById("heroGreeting").style.display = "none";
 
             appendMessage("user", text ? text : "[Artifact Inspection Request]", null, img);
+            showThinkingIndicator();
             dockStatus.innerText = "⚡ First-principles derivation in progress...";
 
             const fd = new FormData();
@@ -1850,6 +1881,7 @@ async def serve_app():
             try {
                 const res = await fetch("/text-process", { method: "POST", body: fd });
                 const d = await res.json();
+                removeThinkingIndicator();
                 
                 if (d.session_id) {
                     currentSessionId = Number(d.session_id);
@@ -1865,6 +1897,7 @@ async def serve_app():
                 }
                 dockStatus.innerText = "● Ready";
             } catch(e) { 
+                removeThinkingIndicator();
                 dockStatus.innerText = "● Connection or server error.";
                 appendMessage("lemon", "Network or server connection error. Please verify server status.", "Formidable");
             }
@@ -1936,6 +1969,7 @@ async def serve_app():
             closeAllSidebars();
         }
 
+        // Safe Auto-Recovery Initializer
         if (currentSessionId > 0) {
             openSavedSession(currentSessionId);
         } else {
