@@ -410,13 +410,11 @@ def heartbeat(user_id: int = Form(...)):
     update_user_heartbeat(user_id)
     return JSONResponse({"status": "ok"})
 
-# ----------------- REPAIRED SESSION SYSTEM -----------------
 @app.get("/api/sessions/{user_id}")
 def get_user_sessions(user_id: int):
     conn, engine = DBManager.get_conn()
     cur = conn.cursor()
     try:
-        # Check if user exists, else auto-provision guest user record to prevent foreign-key drop
         u_check = "SELECT id FROM users WHERE id = %s" if engine == "postgres" else "SELECT id FROM users WHERE id = ?"
         cur.execute(u_check, (user_id,))
         if not cur.fetchone():
@@ -457,7 +455,6 @@ def new_core_session(user_id: int = Form(...), core_mode: str = Form(...)):
     cur = conn.cursor()
     try:
         title = f"{core_mode.capitalize()} Session"
-        # Auto-provision user if missing
         u_check = "SELECT id FROM users WHERE id = %s" if engine == "postgres" else "SELECT id FROM users WHERE id = ?"
         cur.execute(u_check, (user_id,))
         if not cur.fetchone():
