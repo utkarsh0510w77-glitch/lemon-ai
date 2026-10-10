@@ -236,8 +236,8 @@ def generate_ai_title(prompt: str, core: str) -> str:
 def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_base64: str = None, lang_instruction: str = "") -> tuple[str, str]:
     if not GROQ_API_KEY or client is None:
         return (
-            "⚠️ **Groq API Key Unset on Cloud**: Lemon AI engine is initialized, but `GROQ_API_KEY` is missing in Render Environment. "
-            "Please add `GROQ_API_KEY` to Render Dashboard -> Environment. In the meantime, all database, sessions, and settings systems are fully functional.",
+            "⚠️ **Groq API Key Unset on Cloud**: Lemon AI engine is running, but `GROQ_API_KEY` is not present in Render Environment variables. "
+            "Please add `GROQ_API_KEY` to Render Dashboard -> Environment. Database and local systems are fully active.",
             "Formidable"
         )
     
@@ -1212,6 +1212,7 @@ async def serve_app():
 <body>
     <div class="sidebar-overlay" id="overlay" onclick="closeAllSidebars()"></div>
 
+    <!-- GRIEVANCE / FEEDBACK MODAL -->
     <div class="auth-modal" id="complaintModal">
         <div class="auth-box">
             <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -1231,6 +1232,7 @@ async def serve_app():
         </div>
     </div>
 
+    <!-- AUTHENTICATION MODAL -->
     <div class="auth-modal" id="authModal">
         <div class="auth-box">
             <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -1248,6 +1250,7 @@ async def serve_app():
         </div>
     </div>
 
+    <!-- CAMERA SCANNER MODAL -->
     <div class="camera-modal" id="cameraModal">
         <div class="camera-box">
             <h3 style="font-size:16px;">📷 Optical Problem & Note Scanner</h3>
@@ -1264,6 +1267,7 @@ async def serve_app():
         </div>
     </div>
 
+    <!-- LEFT SIDEBAR: CHAMBERS & HISTORY -->
     <aside class="left-sidebar" id="leftSidebar">
         <div class="sidebar-header">
             <div>
@@ -1294,6 +1298,7 @@ async def serve_app():
         <div class="sessions-list" id="sessionsList"></div>
     </aside>
 
+    <!-- RIGHT SIDEBAR: USER SETTINGS & OWNER GATE -->
     <aside class="right-sidebar" id="rightSidebar">
         <div class="sidebar-header">
             <div>
@@ -1337,7 +1342,7 @@ async def serve_app():
         <div class="setting-item">
             <div class="setting-title">Active Account</div>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
-                <span id="activeUserName" style="font-weight:700; color:var(--gold);">Student</span>
+                <span id="activeUserName" style="font-weight:700; color:var(--gold);">⚡ Student</span>
                 <button onclick="openAuthModal()" style="background:none; border:none; color:var(--accent-cyan); font-size:12px; cursor:pointer;">Switch/Login</button>
             </div>
         </div>
@@ -1347,6 +1352,7 @@ async def serve_app():
         <button id="ownerConsoleBtn" onclick="location.href='/owner'" style="display:none; margin-top:auto; background:rgba(250,204,21,0.15); border:1px solid var(--gold); color:var(--gold); padding:12px; border-radius:12px; font-weight:800; font-size:13px; cursor:pointer;">🛡️ Sovereign Owner Console</button>
     </aside>
 
+    <!-- HEADER -->
     <header class="header">
         <div class="header-left">
             <button class="icon-trigger" onclick="openLeftSidebar()">☰</button>
@@ -1362,6 +1368,7 @@ async def serve_app():
         </div>
     </header>
 
+    <!-- QUICK STUDY BAR -->
     <div class="quick-study-bar">
         <div class="study-chip" onclick="quickStudyPrompt('Explain this concept using the Feynman Technique and intuition:')">💡 Feynman Intuition</div>
         <div class="study-chip" onclick="quickStudyPrompt('Generate 3 High-Yield tricky MCQs on this topic with trap explanations:')">🎯 High-Yield MCQs</div>
@@ -1369,6 +1376,7 @@ async def serve_app():
         <div class="study-chip" onclick="quickStudyPrompt('Break down the high-yield NCERT points and common traps for this chapter:')">📖 NCERT Traps</div>
     </div>
 
+    <!-- MAIN CHAT STREAM -->
     <main class="chat-container" id="chatStream">
         <div class="hero-greeting" id="heroGreeting">
             <div class="hero-logo">🍋</div>
@@ -1379,6 +1387,7 @@ async def serve_app():
         </div>
     </main>
 
+    <!-- BOTTOM DOCK -->
     <footer class="bottom-dock">
         <div class="dock-status" id="dockStatus">● Lemon Core Synchronized</div>
         <div class="input-dock">
@@ -1428,22 +1437,37 @@ async def serve_app():
         const avatarDisplayBtn = document.getElementById("avatarDisplayBtn");
 
         function syncUserUI() {
-            document.getElementById("headerUserName").innerText = currentUsername;
-            document.getElementById("activeUserName").innerText = `${currentAvatar} ${currentUsername}`;
-            document.getElementById("heroWelcomeTitle").innerText = `Welcome, ${currentUsername} — Core Ready`;
-            avatarDisplayBtn.innerText = currentAvatar;
-            document.getElementById("prefLanguage").value = currentLanguage;
-            document.getElementById("prefAudioRate").value = String(currentAudioRate);
-            audioElement.playbackRate = currentAudioRate;
+            try {
+                const headerUser = document.getElementById("headerUserName");
+                if (headerUser) headerUser.innerText = currentUsername;
 
-            const ownerBtn = document.getElementById("ownerConsoleBtn");
-            const roleHeader = document.getElementById("userRoleHeader");
-            if (currentUserRole === "owner" || currentUsername.toLowerCase() === "utkarsh") {
-                ownerBtn.style.display = "block";
-                roleHeader.innerText = "Clearance: Sovereign Owner";
-            } else {
-                ownerBtn.style.display = "none";
-                roleHeader.innerText = "Clearance: Student";
+                const activeUser = document.getElementById("activeUserName");
+                if (activeUser) activeUser.innerText = `${currentAvatar} ${currentUsername}`;
+
+                const welcomeTitle = document.getElementById("heroWelcomeTitle");
+                if (welcomeTitle) welcomeTitle.innerText = `Welcome, ${currentUsername} — Core Ready`;
+
+                if (avatarDisplayBtn) avatarDisplayBtn.innerText = currentAvatar;
+
+                const prefLang = document.getElementById("prefLanguage");
+                if (prefLang) prefLang.value = currentLanguage;
+
+                const prefRate = document.getElementById("prefAudioRate");
+                if (prefRate) prefRate.value = String(currentAudioRate);
+
+                if (audioElement) audioElement.playbackRate = currentAudioRate;
+
+                const ownerBtn = document.getElementById("ownerConsoleBtn");
+                const roleHeader = document.getElementById("userRoleHeader");
+                if (currentUserRole === "owner" || currentUsername.toLowerCase() === "utkarsh") {
+                    if (ownerBtn) ownerBtn.style.display = "block";
+                    if (roleHeader) roleHeader.innerText = "Clearance: Sovereign Owner";
+                } else {
+                    if (ownerBtn) ownerBtn.style.display = "none";
+                    if (roleHeader) roleHeader.innerText = "Clearance: Student";
+                }
+            } catch (err) {
+                console.error("syncUserUI error:", err);
             }
         }
         syncUserUI();
@@ -1626,7 +1650,6 @@ async def serve_app():
                 closeAllSidebars();
                 dockStatus.innerText = "● Saved session loaded";
             } catch (error) {
-                // Auto-recovery fallback for old deleted sessions
                 currentSessionId = 0;
                 localStorage.removeItem("lemon_current_session_id");
                 chatStream.replaceChildren();
@@ -1659,7 +1682,7 @@ async def serve_app():
         async function selectAvatar(symbol, elem) {
             currentAvatar = symbol;
             localStorage.setItem("lemon_user_avatar", symbol);
-            avatarDisplayBtn.innerText = symbol;
+            if (avatarDisplayBtn) avatarDisplayBtn.innerText = symbol;
             document.querySelectorAll(".avatar-card").forEach(c => c.classList.remove("active"));
             elem.classList.add("active");
             syncUserUI();
@@ -1913,7 +1936,6 @@ async def serve_app():
             closeAllSidebars();
         }
 
-        // Safe Auto-Recovery Initializer
         if (currentSessionId > 0) {
             openSavedSession(currentSessionId);
         } else {
