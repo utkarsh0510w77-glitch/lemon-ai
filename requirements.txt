@@ -1,7 +1,7 @@
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
-groq==0.4.2
-gtts==2.4.0
-python-multipart==0.0.6
-psycopg2-binary==2.9.9
-pypdf==4.0.1
+fastapi
+uvicorn
+groq
+gtts
+pypdf
+psycopg2-binary
+python-multipart
