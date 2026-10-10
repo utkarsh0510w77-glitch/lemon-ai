@@ -39,11 +39,11 @@ client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 OWNER_USERNAME = "utkarsh"
 OWNER_EMAIL = "utkarsh0510w77@gmail.com"
 
-SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
-SMTP_USER = os.getenv("SMTP_USER", OWNER_EMAIL)
-SMTP_PASS = os.getenv("SMTP_PASS", "").replace(" ", "").strip()
-
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com").strip()
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER", OWNER_EMAIL).strip()
+RAW_PASS = os.getenv("SMTP_PASS", "tldp hoyz nelu vzex")
+SMTP_PASS = RAW_PASS.replace(" ", "").strip()
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 
 app = FastAPI(title="Lemon AI - Sovereign Edition")
@@ -54,14 +54,9 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-)
-
-OTP_STORE = {}
-OWNER_SESSIONS = {}
-
 def send_otp_email(to_email: str, otp: str) -> tuple[bool, str]:
     if not SMTP_USER or not SMTP_PASS:
-        return False, "SMTP_USER and SMTP_PASS must be configured in environment variables."
+        return False, "SMTP credentials missing."
     try:
         msg = MIMEMultipart("alternative")
         msg["Subject"] = f"🍋 Lemon Sovereign Key: {otp}"
@@ -83,15 +78,16 @@ def send_otp_email(to_email: str, otp: str) -> tuple[bool, str]:
         """
         msg.attach(MIMEText(html_body, "html"))
 
-        if SMTP_PORT == 465:
-            with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=12) as server:
-                server.login(SMTP_USER, SMTP_PASS)
-                server.sendmail(SMTP_USER, to_email, msg.as_string())
-        else:
-            with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=12) as server:
-                server.starttls()
-                server.login(SMTP_USER, SMTP_PASS)
-                server.sendmail(SMTP_USER, to_email, msg.as_string())
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as server:
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
+            server.login(SMTP_USER, SMTP_PASS)
+            server.sendmail(SMTP_USER, to_email, msg.as_string())
+        return True, "Dispatched successfully."
+    except Exception as e:
+        print(f"[SMTP Send Error]: {e}")
+        return False, str(e)
         return True, "Dispatched successfully."
     except Exception as e:
         return False, str(e)
