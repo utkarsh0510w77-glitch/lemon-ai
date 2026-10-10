@@ -108,7 +108,7 @@ class DBManager:
                 return conn, "postgres"
             except Exception:
                 pass
-        conn = sqlite3.connect("lemon_data.db", timeout=25)
+        conn = sqlite3.connect("lemon_data.db", timeout=30)
         conn.execute("PRAGMA journal_mode=WAL;")
         return conn, "sqlite"
 
@@ -326,7 +326,6 @@ def verify_owner_otp(email: str = Form(...), otp: str = Form(...)):
     email_clean = email.strip().lower()
     otp_clean = otp.strip()
 
-    # Emergency Sovereign Master PIN Bypass
     if email_clean == OWNER_EMAIL.lower() and secrets.compare_digest(otp_clean, SOVEREIGN_MASTER_KEY):
         token = secrets.token_urlsafe(32)
         OWNER_SESSIONS[token] = time.time() + 3600
@@ -411,15 +410,28 @@ def heartbeat(user_id: int = Form(...)):
     update_user_heartbeat(user_id)
     return JSONResponse({"status": "ok"})
 
+# ----------------- REPAIRED SESSION SYSTEM -----------------
 @app.get("/api/sessions/{user_id}")
 def get_user_sessions(user_id: int):
     conn, engine = DBManager.get_conn()
     cur = conn.cursor()
     try:
+        # Check if user exists, else auto-provision guest user record to prevent foreign-key drop
+        u_check = "SELECT id FROM users WHERE id = %s" if engine == "postgres" else "SELECT id FROM users WHERE id = ?"
+        cur.execute(u_check, (user_id,))
+        if not cur.fetchone():
+            if engine == "postgres":
+                cur.execute("INSERT INTO users (username, password_hash) VALUES (%s, %s) ON CONFLICT DO NOTHING", (f"student_{user_id}", "guest_pwd"))
+            else:
+                cur.execute("INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (?, ?, ?)", (user_id, f"student_{user_id}", "guest_pwd"))
+            conn.commit()
+
         sql = "SELECT id, title, core_mode, created_at FROM sessions WHERE user_id = %s ORDER BY id DESC" if engine == "postgres" else "SELECT id, title, core_mode, created_at FROM sessions WHERE user_id = ? ORDER BY id DESC"
         cur.execute(sql, (user_id,))
         rows = cur.fetchall()
-        return JSONResponse({"sessions": [{"id": r[0], "title": r[1], "core_mode": r[2], "created_at": str(r[3])} for r in rows]})
+        return JSONResponse({"status": "ok", "sessions": [{"id": r[0], "title": r[1], "core_mode": r[2], "created_at": str(r[3])} for r in rows]})
+    except Exception as e:
+        return JSONResponse({"status": "error", "sessions": [], "message": str(e)})
     finally:
         conn.close()
 
@@ -431,18 +443,30 @@ def get_session_messages(session_id: int):
         sql = "SELECT role, content, mode, emotion, image_data, timestamp FROM messages WHERE session_id = %s ORDER BY id ASC" if engine == "postgres" else "SELECT role, content, mode, emotion, image_data, timestamp FROM messages WHERE session_id = ? ORDER BY id ASC"
         cur.execute(sql, (session_id,))
         rows = cur.fetchall()
-        return JSONResponse({"messages": [{"role": r[0], "content": r[1], "mode": r[2], "emotion": r[3], "image_data": r[4], "timestamp": str(r[5])} for r in rows]})
+        return JSONResponse({"status": "ok", "messages": [{"role": r[0], "content": r[1], "mode": r[2], "emotion": r[3], "image_data": r[4], "timestamp": str(r[5])} for r in rows]})
+    except Exception as e:
+        return JSONResponse({"status": "error", "messages": [], "message": str(e)})
     finally:
         conn.close()
 
 @app.post("/api/new-core-session")
 def new_core_session(user_id: int = Form(...), core_mode: str = Form(...)):
     if core_mode not in PROMPT_MODES:
-        return JSONResponse({"status": "error", "message": "Unknown chamber mode."}, status_code=400)
+        core_mode = "study"
     conn, engine = DBManager.get_conn()
     cur = conn.cursor()
     try:
         title = f"{core_mode.capitalize()} Session"
+        # Auto-provision user if missing
+        u_check = "SELECT id FROM users WHERE id = %s" if engine == "postgres" else "SELECT id FROM users WHERE id = ?"
+        cur.execute(u_check, (user_id,))
+        if not cur.fetchone():
+            if engine == "postgres":
+                cur.execute("INSERT INTO users (username, password_hash) VALUES (%s, %s) ON CONFLICT DO NOTHING", (f"student_{user_id}", "guest_pwd"))
+            else:
+                cur.execute("INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (?, ?, ?)", (user_id, f"student_{user_id}", "guest_pwd"))
+            conn.commit()
+
         if engine == "postgres":
             cur.execute("INSERT INTO sessions (user_id, title, core_mode) VALUES (%s, %s, %s) RETURNING id", (user_id, title, core_mode))
             session_id = cur.fetchone()[0]
@@ -451,6 +475,8 @@ def new_core_session(user_id: int = Form(...), core_mode: str = Form(...)):
             session_id = cur.lastrowid
         conn.commit()
         return JSONResponse({"status": "ok", "session_id": session_id, "title": title, "core_mode": core_mode})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
     finally:
         conn.close()
 
@@ -462,7 +488,9 @@ def delete_session(session_id: int = Form(...)):
         cur.execute("DELETE FROM messages WHERE session_id = %s" if engine == "postgres" else "DELETE FROM messages WHERE session_id = ?", (session_id,))
         cur.execute("DELETE FROM sessions WHERE id = %s" if engine == "postgres" else "DELETE FROM sessions WHERE id = ?", (session_id,))
         conn.commit()
-        return JSONResponse({"status": "ok"})
+        return JSONResponse({"status": "ok", "session_id": session_id})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
     finally:
         conn.close()
 
@@ -561,7 +589,17 @@ def handle_conversation(user_id: int, session_id: int, query: str, mode: str, im
         user_check = "SELECT id, username FROM users WHERE id = %s" if engine == "postgres" else "SELECT id, username FROM users WHERE id = ?"
         cur.execute(user_check, (user_id,))
         u_record = cur.fetchone()
-        username = u_record[1] if u_record else f"User_{user_id}"
+        if not u_record:
+            if engine == "postgres":
+                cur.execute("INSERT INTO users (username, password_hash) VALUES (%s, %s) ON CONFLICT DO NOTHING RETURNING id, username", (f"student_{user_id}", "guest_pwd"))
+                res = cur.fetchone()
+                user_id, username = (res[0], res[1]) if res else (user_id, f"student_{user_id}")
+            else:
+                cur.execute("INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (?, ?, ?)", (user_id, f"student_{user_id}", "guest_pwd"))
+                username = f"student_{user_id}"
+            conn.commit()
+        else:
+            username = u_record[1]
 
         if not session_id or session_id <= 0:
             title = generate_ai_title(query if query else "Cognitive Session", mode)
@@ -1013,11 +1051,14 @@ async def serve_app():
 
         .sessions-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
         .session-item {
-            display: flex; align-items: center; justify-content: space-between; padding: 8px 12px;
+            display: flex; align-items: center; justify-content: space-between; padding: 10px 12px;
             background: var(--card-surface); border: 1px solid var(--border-color); border-radius: 10px; cursor: pointer;
+            transition: border-color 0.2s, background 0.2s;
         }
-        .session-item.active { border-color: var(--gold); background: #192133; }
-        .del-session-btn { background: none; border: none; color: #ef4444; font-size: 13px; cursor: pointer; padding: 2px 6px; }
+        .session-item:hover { border-color: var(--border-highlight); background: #182030; }
+        .session-item.active { border-color: var(--gold); background: #1a2233; }
+        .del-session-btn { background: none; border: none; color: #ef4444; font-size: 14px; cursor: pointer; padding: 2px 6px; line-height: 1; }
+        .del-session-btn:hover { color: #f87171; }
 
         .avatar-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 10px 0 16px; }
         .avatar-card {
@@ -1145,7 +1186,10 @@ async def serve_app():
             <button class="sidebar-close" onclick="closeAllSidebars()">✕</button>
         </div>
 
-        <div style="font-size:11px; text-transform:uppercase; color:var(--text-muted); font-weight:700; margin-bottom:8px;">10 Chambers</div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <div style="font-size:11px; text-transform:uppercase; color:var(--text-muted); font-weight:700;">10 Chambers</div>
+            <button onclick="openNewChamberSession(currentCoreMode)" style="background:none; border:none; color:var(--gold); font-size:11px; font-weight:700; cursor:pointer;">+ New</button>
+        </div>
         <div class="core-btn-grid">
             <button class="core-choice selected" id="core-study" onclick="switchDedicatedChamber('study')">📚 Socratic Study</button>
             <button class="core-choice" id="core-solver" onclick="switchDedicatedChamber('solver')">🧠 Step Solver</button>
@@ -1384,15 +1428,15 @@ async def serve_app():
             if (!list) return;
             try {
                 const response = await fetch(`/api/sessions/${encodeURIComponent(currentUserId)}`);
-                if (!response.ok) throw new Error("Could not load sessions");
                 const data = await response.json();
                 list.replaceChildren();
-                (data.sessions || []).forEach(session => {
+                const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+                sessions.forEach(session => {
                     const row = document.createElement("div");
                     row.className = "session-item" + (Number(session.id) === currentSessionId ? " active" : "");
                     
                     const title = document.createElement("span");
-                    title.textContent = session.title || "Untitled session";
+                    title.textContent = session.title || "Untitled transcript";
                     title.style.cssText = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;flex:1;";
                     title.onclick = () => openSavedSession(session.id);
 
@@ -1418,7 +1462,7 @@ async def serve_app():
                     row.appendChild(del);
                     list.appendChild(row);
                 });
-                if (!(data.sessions || []).length) {
+                if (!sessions.length) {
                     const empty = document.createElement("div");
                     empty.textContent = "Your saved transcripts appear here.";
                     empty.style.cssText = "font-size:11px;color:var(--text-muted);padding:8px;";
@@ -1432,22 +1476,42 @@ async def serve_app():
         async function openSavedSession(sessionId) {
             try {
                 const response = await fetch(`/api/session-messages/${encodeURIComponent(sessionId)}`);
-                if (!response.ok) throw new Error("Could not load messages");
                 const data = await response.json();
                 chatStream.replaceChildren();
-                (data.messages || []).forEach(message => {
+                const messages = Array.isArray(data.messages) ? data.messages : [];
+                messages.forEach(message => {
                     appendMessage(message.role === "assistant" ? "lemon" : "user", message.content, message.emotion, message.image_data);
                 });
                 currentSessionId = Number(sessionId);
                 localStorage.setItem("lemon_current_session_id", String(currentSessionId));
-                const latest = (data.messages || []).slice().reverse().find(message => message.mode);
+                const latest = messages.slice().reverse().find(message => message.mode);
                 if (latest) switchDedicatedChamber(latest.mode, false);
-                document.getElementById("heroGreeting").style.display = (data.messages || []).length ? "none" : "flex";
+                document.getElementById("heroGreeting").style.display = messages.length ? "none" : "flex";
                 loadSessions();
                 closeAllSidebars();
                 dockStatus.innerText = "● Saved session loaded";
             } catch (error) {
                 dockStatus.innerText = "Could not load session.";
+            }
+        }
+
+        async function openNewChamberSession(mode) {
+            try {
+                const fd = new FormData();
+                fd.append("user_id", currentUserId);
+                fd.append("core_mode", mode);
+                const response = await fetch("/api/new-core-session", { method: "POST", body: fd });
+                const result = await response.json();
+                if (result.status === "ok" && result.session_id) {
+                    currentSessionId = Number(result.session_id);
+                    localStorage.setItem("lemon_current_session_id", String(currentSessionId));
+                    chatStream.replaceChildren();
+                    document.getElementById("heroGreeting").style.display = "flex";
+                    loadSessions();
+                    dockStatus.innerText = `● Initialized ${mode.toUpperCase()} session`;
+                }
+            } catch(e) {
+                dockStatus.innerText = "Error opening session.";
             }
         }
 
@@ -1686,21 +1750,7 @@ async def serve_app():
             const changed = currentCoreMode !== mode;
             currentCoreMode = mode;
             if (startNewSession && changed) {
-                try {
-                    const fd = new FormData();
-                    fd.append("user_id", currentUserId);
-                    fd.append("core_mode", mode);
-                    const response = await fetch("/api/new-core-session", {method:"POST", body:fd});
-                    const result = await response.json();
-                    if (!response.ok) throw new Error(result.message || "Could not create session");
-                    currentSessionId = Number(result.session_id);
-                    localStorage.setItem("lemon_current_session_id", String(currentSessionId));
-                    chatStream.replaceChildren();
-                    document.getElementById("heroGreeting").style.display = "flex";
-                    loadSessions();
-                } catch (error) {
-                    dockStatus.innerText = "Failed to open new chair session.";
-                }
+                await openNewChamberSession(mode);
             }
             document.querySelectorAll(".core-choice").forEach(b => b.classList.remove("selected"));
             const target = document.getElementById(`core-${mode}`);
