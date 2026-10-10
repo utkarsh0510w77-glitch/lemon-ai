@@ -38,6 +38,7 @@ client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
 OWNER_USERNAME = "utkarsh"
 OWNER_EMAIL = "utkarsh0510w77@gmail.com"
+SOVEREIGN_MASTER_KEY = os.getenv("SOVEREIGN_MASTER_KEY", "770510").strip()
 
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com").strip()
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
@@ -84,7 +85,7 @@ def send_otp_email(to_email: str, otp: str) -> tuple[bool, str]:
         """
         msg.attach(MIMEText(html_body, "html"))
 
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as server:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as server:
             server.ehlo()
             server.starttls()
             server.ehlo()
@@ -92,7 +93,7 @@ def send_otp_email(to_email: str, otp: str) -> tuple[bool, str]:
             server.sendmail(SMTP_USER, to_email, msg.as_string())
         return True, "Dispatched successfully."
     except Exception as e:
-        print(f"[SMTP Send Error]: {e}")
+        print(f"[SMTP Send Error / Render Firewall Block]: {e}")
         return False, str(e)
 
 class DBManager:
@@ -307,28 +308,41 @@ def request_owner_otp(email: str = Form(...)):
     OTP_STORE[email_clean] = {"otp": otp, "expires_at": time.time() + 300, "attempts": 0}
 
     sent, msg = send_otp_email(email_clean, otp)
+    print(f"\n==========================================")
+    print(f"🍋 [LEMON OWNER ACCESS KEY]: {otp}")
+    print(f"🛡️ [EMERGENCY MASTER PIN]: {SOVEREIGN_MASTER_KEY}")
+    print(f"==========================================\n")
+
     if sent:
         return JSONResponse({"status": "ok", "message": f"Live OTP sent to {email_clean}!"})
     else:
-        OTP_STORE.pop(email_clean, None)
-        return JSONResponse({"status": "error", "message": f"Dispatch fault: {msg}"}, status_code=503)
+        return JSONResponse({
+            "status": "ok",
+            "message": f"Render Free Tier blocked outbound email port. Use Sovereign PIN (770510) or check Render Logs for code {otp}."
+        })
 
 @app.post("/api/owner/verify-otp")
 def verify_owner_otp(email: str = Form(...), otp: str = Form(...)):
     email_clean = email.strip().lower()
     otp_clean = otp.strip()
 
+    # Emergency Sovereign Master PIN Bypass
+    if email_clean == OWNER_EMAIL.lower() and secrets.compare_digest(otp_clean, SOVEREIGN_MASTER_KEY):
+        token = secrets.token_urlsafe(32)
+        OWNER_SESSIONS[token] = time.time() + 3600
+        return JSONResponse({"status": "ok", "token": token, "username": OWNER_USERNAME})
+
     record = OTP_STORE.get(email_clean)
     if not record or time.time() > record["expires_at"]:
         OTP_STORE.pop(email_clean, None)
-        return JSONResponse({"status": "error", "message": "OTP expired or not requested."}, status_code=400)
+        return JSONResponse({"status": "error", "message": "OTP expired. Enter 770510 to bypass."}, status_code=400)
 
-    if record.get("attempts", 0) >= 5:
+    if record.get("attempts", 0) >= 10:
         OTP_STORE.pop(email_clean, None)
-        return JSONResponse({"status": "error", "message": "Too many attempts."}, status_code=429)
+        return JSONResponse({"status": "error", "message": "Too many attempts. Enter Sovereign PIN 770510."}, status_code=429)
     if not secrets.compare_digest(record["otp"], otp_clean):
         record["attempts"] = record.get("attempts", 0) + 1
-        return JSONResponse({"status": "error", "message": "Incorrect OTP code."}, status_code=401)
+        return JSONResponse({"status": "error", "message": "Incorrect code. (Tip: Enter Sovereign PIN 770510)"}, status_code=401)
 
     OTP_STORE.pop(email_clean, None)
     token = secrets.token_urlsafe(32)
@@ -699,6 +713,9 @@ async def voice_process(
         "username": username
     })
 
+# =====================================================================
+# 🛡️ SOVEREIGN OWNER COMMAND PORTAL: /owner
+# =====================================================================
 @app.get("/owner", response_class=HTMLResponse)
 async def serve_owner_dashboard():
     html_page = """<!DOCTYPE html>
@@ -751,12 +768,12 @@ async def serve_owner_dashboard():
             <div style="font-size:36px; margin-bottom:8px;">🛡️</div>
             <h2 style="font-family:'Space Grotesk'; font-size:20px; margin-bottom:6px;">Master Clearance Gate</h2>
             <p style="font-size:12px; color:var(--text-muted); margin-bottom:14px;">Master Account: <b>__OWNER_EMAIL__</b></p>
-            <div id="otpStatusMsg" style="font-size:12px; color:#4ade80; margin-bottom:10px;">Dispatch authentication key to master email.</div>
+            <div id="otpStatusMsg" style="font-size:12px; color:#4ade80; margin-bottom:10px;">Dispatch authentication key or enter Sovereign PIN.</div>
             
             <button class="action-btn" id="reqOtpBtn" onclick="requestOtp()">📩 Send OTP to Master Gmail</button>
 
-            <div id="otpInputArea" style="display:none; margin-top:14px;">
-                <input type="text" id="otpCodeInput" class="search-input" placeholder="Enter 6-digit key" maxlength="6" style="text-align:center; font-size:18px; letter-spacing:4px;" />
+            <div id="otpInputArea" style="display:block; margin-top:14px;">
+                <input type="text" id="otpCodeInput" class="search-input" placeholder="Enter OTP or PIN: 770510" maxlength="6" style="text-align:center; font-size:18px; letter-spacing:4px;" />
                 <button class="action-btn" onclick="verifyOtp()">Unlock Sovereign Console</button>
             </div>
             <div id="otpErrMsg" style="color:#f87171; font-size:12px; margin-top:10px; display:none;"></div>
@@ -822,10 +839,9 @@ async def serve_owner_dashboard():
                 const res = await fetch("/api/owner/request-otp", { method: "POST", body: fd });
                 const d = await res.json();
                 document.getElementById("otpStatusMsg").innerText = d.message;
-                document.getElementById("otpInputArea").style.display = "block";
                 btn.innerText = "Re-send OTP";
             } catch(e) {
-                document.getElementById("otpErrMsg").innerText = "Failed to transmit OTP.";
+                document.getElementById("otpErrMsg").innerText = "Failed to transmit OTP. Enter Sovereign PIN 770510.";
                 document.getElementById("otpErrMsg").style.display = "block";
             }
         }
@@ -846,11 +862,11 @@ async def serve_owner_dashboard():
                     document.getElementById("ownerOtpGate").style.display = "none";
                     loadTelemetry();
                 } else {
-                    err.innerText = d.message || "Invalid OTP code.";
+                    err.innerText = d.message || "Invalid OTP code. Enter Sovereign PIN 770510.";
                     err.style.display = "block";
                 }
             } catch(e) {
-                err.innerText = "Clearance failure.";
+                err.innerText = "Clearance failure. Enter Sovereign PIN 770510.";
                 err.style.display = "block";
             }
         }
