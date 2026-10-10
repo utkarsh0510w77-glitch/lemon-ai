@@ -44,6 +44,7 @@ SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", OWNER_EMAIL).strip()
 RAW_PASS = os.getenv("SMTP_PASS", "tldp hoyz nelu vzex")
 SMTP_PASS = RAW_PASS.replace(" ", "").strip()
+
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 
 app = FastAPI(title="Lemon AI - Sovereign Edition")
@@ -54,6 +55,11 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+OTP_STORE = {}
+OWNER_SESSIONS = {}
+
 def send_otp_email(to_email: str, otp: str) -> tuple[bool, str]:
     if not SMTP_USER or not SMTP_PASS:
         return False, "SMTP credentials missing."
@@ -87,9 +93,6 @@ def send_otp_email(to_email: str, otp: str) -> tuple[bool, str]:
         return True, "Dispatched successfully."
     except Exception as e:
         print(f"[SMTP Send Error]: {e}")
-        return False, str(e)
-        return True, "Dispatched successfully."
-    except Exception as e:
         return False, str(e)
 
 class DBManager:
@@ -132,7 +135,6 @@ def init_db():
             """)
             conn.commit()
         else:
-            # Fixed: Using executescript for multi-statement SQLite execution
             cur.executescript("""
                 CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'user', avatar TEXT DEFAULT '⚡', last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
                 CREATE TABLE IF NOT EXISTS site_stats (key TEXT PRIMARY KEY, value INTEGER DEFAULT 0);
@@ -295,7 +297,6 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
             continue
     return "Cognitive process desynchronized.", "Serene"
 
-# ----------------- OWNER OTP AUTHENTICATION APIS -----------------
 @app.post("/api/owner/request-otp")
 def request_owner_otp(email: str = Form(...)):
     email_clean = email.strip().lower()
@@ -334,7 +335,6 @@ def verify_owner_otp(email: str = Form(...), otp: str = Form(...)):
     OWNER_SESSIONS[token] = time.time() + 3600
     return JSONResponse({"status": "ok", "token": token, "username": OWNER_USERNAME})
 
-# ----------------- REGISTRATION & LOGIN -----------------
 @app.post("/api/register")
 def register_user(username: str = Form(...), password: str = Form(...), avatar: str = Form("⚡")):
     clean_user = username.strip().lower()
@@ -699,9 +699,6 @@ async def voice_process(
         "username": username
     })
 
-# =====================================================================
-# 🛡️ SOVEREIGN OWNER COMMAND PORTAL: /owner
-# =====================================================================
 @app.get("/owner", response_class=HTMLResponse)
 async def serve_owner_dashboard():
     html_page = """<!DOCTYPE html>
@@ -890,9 +887,6 @@ async def serve_owner_dashboard():
 </html>"""
     return HTMLResponse(content=html_page.replace("__OWNER_EMAIL__", OWNER_EMAIL))
 
-# =====================================================================
-# 🌐 MAIN USER INTERFACE: / (FUTURISTIC SOVEREIGN COCKPIT)
-# =====================================================================
 @app.get("/", response_class=HTMLResponse)
 async def serve_app():
     record_visit()
@@ -931,7 +925,6 @@ async def serve_app():
         ::-webkit-scrollbar-thumb { background: #222b3d; border-radius: 6px; }
         ::-webkit-scrollbar-thumb:hover { background: var(--gold); }
 
-        /* Future Header */
         .header {
             padding: 12px 20px; display: flex; align-items: center; justify-content: space-between;
             background: rgba(14, 18, 28, 0.85); backdrop-filter: blur(12px); border-bottom: 1px solid var(--border-color);
@@ -958,7 +951,6 @@ async def serve_app():
             padding: 5px 14px; border-radius: 20px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
         }
 
-        /* Chips Bar */
         .quick-study-bar {
             display: flex; gap: 8px; padding: 8px 18px; background: #0a0d14;
             border-bottom: 1px solid var(--border-color); overflow-x: auto; flex-shrink: 0;
@@ -969,7 +961,6 @@ async def serve_app():
         }
         .study-chip:hover { border-color: var(--gold); color: var(--gold); transform: translateY(-1px); }
 
-        /* Dual Sidebars */
         .sidebar-overlay {
             position: fixed; inset: 0; background: rgba(3, 5, 8, 0.85); backdrop-filter: blur(8px);
             z-index: 1000; opacity: 0; pointer-events: none; transition: opacity 0.3s;
@@ -1041,7 +1032,6 @@ async def serve_app():
 
         .chat-img-thumb { max-width: 240px; border-radius: 12px; margin-bottom: 10px; border: 1px solid var(--border-color); }
 
-        /* Auth Modal */
         .auth-modal {
             position: fixed; inset: 0; background: rgba(3, 5, 8, 0.95); backdrop-filter: blur(20px);
             z-index: 3000; display: none; align-items: center; justify-content: center; padding: 20px;
@@ -1055,7 +1045,6 @@ async def serve_app():
         .auth-tab.active { background: var(--gold); color: #000; }
         .auth-input { width: 100%; background: #080a10; border: 1px solid var(--border-color); border-radius: 10px; padding: 12px; color: #fff; font-size: 13px; outline: none; }
 
-        /* Camera Modal */
         .camera-modal {
             position: fixed; inset: 0; background: rgba(5,7,12,0.95); z-index: 2500;
             display: none; flex-direction: column; align-items: center; justify-content: center; padding: 20px;
@@ -1067,7 +1056,6 @@ async def serve_app():
         .camera-video { width: 100%; height: 260px; border-radius: 12px; background: #000; object-fit: cover; }
         .camera-ctrls { display: flex; gap: 10px; width: 100%; justify-content: center; }
 
-        /* Bottom Dock */
         .bottom-dock {
             padding: 10px 18px 18px; background: rgba(14, 18, 28, 0.95); border-top: 1px solid var(--border-color); flex-shrink: 0;
         }
@@ -1099,7 +1087,6 @@ async def serve_app():
 <body>
     <div class="sidebar-overlay" id="overlay" onclick="closeAllSidebars()"></div>
 
-    <!-- AUTHENTICATION MODAL -->
     <div class="auth-modal" id="authModal">
         <div class="auth-box">
             <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -1117,7 +1104,6 @@ async def serve_app():
         </div>
     </div>
 
-    <!-- CAMERA SCANNER MODAL -->
     <div class="camera-modal" id="cameraModal">
         <div class="camera-box">
             <h3 style="font-size:16px;">📷 Optical Problem & Note Scanner</h3>
@@ -1134,7 +1120,6 @@ async def serve_app():
         </div>
     </div>
 
-    <!-- LEFT SIDEBAR: CHAMBERS & HISTORY -->
     <aside class="left-sidebar" id="leftSidebar">
         <div class="sidebar-header">
             <div>
@@ -1162,7 +1147,6 @@ async def serve_app():
         <div class="sessions-list" id="sessionsList"></div>
     </aside>
 
-    <!-- RIGHT SIDEBAR: USER SETTINGS & OWNER GATE -->
     <aside class="right-sidebar" id="rightSidebar">
         <div class="sidebar-header">
             <div>
@@ -1184,7 +1168,6 @@ async def serve_app():
             <div class="avatar-card" onclick="selectAvatar('👑', this)"><div class="avatar-icon">👑</div><div class="avatar-label">Sovereign</div></div>
         </div>
 
-        <!-- NEW: COMPREHENSIVE USER PREFERENCES -->
         <div class="setting-item">
             <div class="setting-title">Cognitive Response Language</div>
             <select class="setting-select" id="prefLanguage" onchange="saveUserPrefs()">
@@ -1212,11 +1195,9 @@ async def serve_app():
             </div>
         </div>
 
-        <!-- STRICT OWNER VISIBILITY GATE -->
         <button id="ownerConsoleBtn" onclick="location.href='/owner'" style="display:none; margin-top:auto; background:rgba(250,204,21,0.15); border:1px solid var(--gold); color:var(--gold); padding:12px; border-radius:12px; font-weight:800; font-size:13px; cursor:pointer;">🛡️ Sovereign Owner Console</button>
     </aside>
 
-    <!-- HEADER -->
     <header class="header">
         <div class="header-left">
             <button class="icon-trigger" onclick="openLeftSidebar()">☰</button>
@@ -1232,7 +1213,6 @@ async def serve_app():
         </div>
     </header>
 
-    <!-- QUICK STUDY BAR -->
     <div class="quick-study-bar">
         <div class="study-chip" onclick="quickStudyPrompt('Explain this concept using the Feynman Technique and intuition:')">💡 Feynman Intuition</div>
         <div class="study-chip" onclick="quickStudyPrompt('Generate 3 High-Yield tricky MCQs on this topic with trap explanations:')">🎯 High-Yield MCQs</div>
@@ -1240,7 +1220,6 @@ async def serve_app():
         <div class="study-chip" onclick="quickStudyPrompt('Break down the high-yield NCERT points and common traps for this chapter:')">📖 NCERT Traps</div>
     </div>
 
-    <!-- MAIN CHAT STREAM -->
     <main class="chat-container" id="chatStream">
         <div class="hero-greeting" id="heroGreeting">
             <div class="hero-logo">🍋</div>
@@ -1251,7 +1230,6 @@ async def serve_app():
         </div>
     </main>
 
-    <!-- BOTTOM DOCK -->
     <footer class="bottom-dock">
         <div class="dock-status" id="dockStatus">● Lemon Core Synchronized</div>
         <div class="input-dock">
@@ -1307,7 +1285,6 @@ async def serve_app():
             document.getElementById("prefAudioRate").value = String(currentAudioRate);
             audioElement.playbackRate = currentAudioRate;
 
-            // Strict Owner Button Gate
             const ownerBtn = document.getElementById("ownerConsoleBtn");
             const roleHeader = document.getElementById("userRoleHeader");
             if (currentUserRole === "owner" || currentUsername.toLowerCase() === "utkarsh") {
@@ -1329,7 +1306,6 @@ async def serve_app():
             dockStatus.innerText = "● Preferences saved";
         }
 
-        // Authentication Modal Handlers
         function openAuthModal() {
             document.getElementById("authModal").style.display = "flex";
             closeAllSidebars();
