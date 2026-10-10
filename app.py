@@ -11,6 +11,7 @@ import random
 import secrets
 import smtplib
 import tempfile
+from typing import Optional
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
@@ -233,8 +234,8 @@ def generate_ai_title(prompt: str, core: str) -> str:
     return f"{core.capitalize()} Session"
 
 def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_base64: str = None, lang_instruction: str = "") -> tuple[str, str]:
-    if client is None:
-        return "Lemon AI is offline. Provide a valid GROQ_API_KEY environment variable.", "Formidable"
+    if not GROQ_API_KEY or client is None:
+        return "⚠️ GROQ_API_KEY is not configured on Render. Please go to your Render Dashboard -> Environment and add GROQ_API_KEY with your Groq API key.", "Formidable"
     
     instruction = PROMPT_MODES.get(mode, PROMPT_MODES["study"])
     if lang_instruction:
@@ -278,6 +279,7 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
         messages.append({"role": h["role"], "content": h["content"]})
     messages.append({"role": "user", "content": user_prompt})
 
+    last_error = ""
     for tm in ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]:
         try:
             chat = client.chat.completions.create(
@@ -294,9 +296,12 @@ def ask_groq_vision_or_llm(user_prompt: str, mode: str, history: list, image_bas
                     emotion = match.group(1).capitalize()
                     raw = re.sub(r'\[EMOTION:\s*[A-Za-z]+\]', '', raw).strip()
                 return raw, emotion
-        except Exception:
+        except Exception as e:
+            last_error = str(e)
+            print(f"[Groq Error on {tm}]: {e}")
             continue
-    return "Cognitive process desynchronized.", "Serene"
+
+    return f"Cognitive synthesis paused. Check your Groq key or quota. Detail: {last_error}", "Serene"
 
 @app.post("/api/owner/request-otp")
 def request_owner_otp(email: str = Form(...)):
@@ -333,8 +338,7 @@ def verify_owner_otp(email: str = Form(...), otp: str = Form(...)):
 
     record = OTP_STORE.get(email_clean)
     if not record or time.time() > record["expires_at"]:
-        OTP_STORE.pop(email_clean, None)
-        return JSONResponse({"status": "error", "message": "OTP expired. Enter 770510 to bypass."}, status_code=400)
+        return JSONResponse({"status": "error", "message": "OTP expired. Enter Sovereign PIN 770510."}, status_code=400)
 
     if record.get("attempts", 0) >= 10:
         OTP_STORE.pop(email_clean, None)
@@ -667,26 +671,41 @@ async def text_process(
     user_id: str = Form("1"),
     session_id: str = Form("0"),
     mode: str = Form("study"),
-    image_base64: str = Form(None),
+    image_base64: str = Form(""),
     language: str = Form("en")
 ):
-    u_id = int(user_id) if str(user_id).isdigit() else 1
-    s_id = int(session_id) if str(session_id).isdigit() else 0
-    if mode not in PROMPT_MODES:
-        mode = "study"
-    img = image_base64 if (image_base64 and image_base64 != "null" and len(image_base64.strip()) > 50) else None
+    try:
+        u_id = int(user_id) if str(user_id).isdigit() else 1
+        s_id = int(session_id) if str(session_id).isdigit() else 0
+        if mode not in PROMPT_MODES:
+            mode = "study"
+        img = image_base64 if (image_base64 and len(image_base64.strip()) > 50) else None
 
-    reply_text, emotion, res_s_id, title, cur_mode, audio_base64, username = handle_conversation(u_id, s_id, text, mode, img, language)
-    return JSONResponse({
-        "user_text": text,
-        "reply_text": reply_text,
-        "emotion": emotion,
-        "session_id": res_s_id,
-        "title": title,
-        "mode": cur_mode,
-        "audio_base64": audio_base64,
-        "username": username
-    })
+        reply_text, emotion, res_s_id, title, cur_mode, audio_base64, username = handle_conversation(u_id, s_id, text, mode, img, language)
+        return JSONResponse({
+            "status": "ok",
+            "user_text": text,
+            "reply_text": reply_text,
+            "emotion": emotion,
+            "session_id": res_s_id,
+            "title": title,
+            "mode": cur_mode,
+            "audio_base64": audio_base64,
+            "username": username
+        })
+    except Exception as exc:
+        print(f"[Text Process Error]: {exc}")
+        return JSONResponse({
+            "status": "error",
+            "message": str(exc),
+            "reply_text": f"Cognitive processing error: {exc}. Please verify server logs and API keys.",
+            "emotion": "Formidable",
+            "session_id": int(session_id) if str(session_id).isdigit() else 0,
+            "title": "Error Session",
+            "mode": mode,
+            "audio_base64": None,
+            "username": "Student"
+        }, status_code=200)
 
 @app.post("/voice-process")
 async def voice_process(
@@ -694,16 +713,16 @@ async def voice_process(
     user_id: str = Form("1"),
     session_id: str = Form("0"),
     mode: str = Form("study"),
-    image_base64: str = Form(None),
+    image_base64: str = Form(""),
     language: str = Form("en")
 ):
-    if client is None:
-        return JSONResponse({"status": "error", "message": "Voice processing requires GROQ_API_KEY."}, status_code=503)
+    if not GROQ_API_KEY or client is None:
+        return JSONResponse({"status": "error", "message": "Voice processing requires GROQ_API_KEY on Render."}, status_code=503)
     u_id = int(user_id) if str(user_id).isdigit() else 1
     s_id = int(session_id) if str(session_id).isdigit() else 0
     if mode not in PROMPT_MODES:
         mode = "study"
-    img = image_base64 if (image_base64 and image_base64 != "null" and len(image_base64.strip()) > 50) else None
+    img = image_base64 if (image_base64 and len(image_base64.strip()) > 50) else None
     audio_bytes = await file.read()
     if not audio_bytes:
         return JSONResponse({"status": "error", "message": "Uploaded audio is empty."}, status_code=400)
@@ -1309,6 +1328,8 @@ async def serve_app():
         let currentUsername = localStorage.getItem("lemon_username") || "Student";
         let currentUserRole = localStorage.getItem("lemon_user_role") || "user";
         let currentSessionId = parseInt(localStorage.getItem("lemon_current_session_id") || "0");
+        if (Number.isNaN(currentSessionId)) currentSessionId = 0;
+
         let currentCoreMode = "study";
         let currentAvatar = localStorage.getItem("lemon_user_avatar") || "⚡";
         let currentLanguage = localStorage.getItem("lemon_pref_lang") || "en";
@@ -1565,9 +1586,10 @@ async def serve_app():
                     const fd = new FormData();
                     fd.append("file", blob, "voice.webm");
                     fd.append("user_id", currentUserId);
-                    fd.append("session_id", String(currentSessionId));
+                    fd.append("session_id", String(currentSessionId || 0));
                     fd.append("mode", currentCoreMode);
                     fd.append("language", currentLanguage);
+                    fd.append("image_base64", "");
                     try {
                         const response = await fetch("/voice-process", { method: "POST", body: fd });
                         const result = await response.json();
@@ -1576,7 +1598,7 @@ async def serve_app():
                         appendMessage("user", result.user_text || "[Voice message]", null);
                         appendMessage("lemon", result.reply_text, result.emotion);
                         if (result.session_id) {
-                            currentSessionId = result.session_id;
+                            currentSessionId = Number(result.session_id);
                             localStorage.setItem("lemon_current_session_id", String(currentSessionId));
                         }
                         loadSessions();
@@ -1674,18 +1696,20 @@ async def serve_app():
             const fd = new FormData();
             fd.append("text", text ? text : "Examine this problem or diagram step-by-step.");
             fd.append("user_id", currentUserId);
-            fd.append("session_id", currentSessionId.toString());
+            fd.append("session_id", String(currentSessionId || 0));
             fd.append("mode", currentCoreMode);
             fd.append("language", currentLanguage);
-            if (img) fd.append("image_base64", img);
+            fd.append("image_base64", img || "");
 
             try {
                 const res = await fetch("/text-process", { method: "POST", body: fd });
                 const d = await res.json();
-                if (!res.ok) throw new Error(d.message || "Request failed");
-                currentSessionId = d.session_id;
-                localStorage.setItem("lemon_current_session_id", currentSessionId.toString());
-                appendMessage("lemon", d.reply_text, d.emotion);
+                
+                if (d.session_id) {
+                    currentSessionId = Number(d.session_id);
+                    localStorage.setItem("lemon_current_session_id", String(currentSessionId));
+                }
+                appendMessage("lemon", d.reply_text || "Cognitive process completed.", d.emotion || "Insightful");
                 loadSessions();
 
                 if (d.audio_base64) {
@@ -1694,7 +1718,10 @@ async def serve_app():
                     audioElement.play().catch(() => {});
                 }
                 dockStatus.innerText = "● Ready";
-            } catch(e) { dockStatus.innerText = "Cognitive core desynchronized. Please retry."; }
+            } catch(e) { 
+                dockStatus.innerText = "● Connection or server error.";
+                appendMessage("lemon", "Network or server connection error. Please verify server status.", "Formidable");
+            }
         }
 
         function appendMessage(sender, text, emotion, img) {
