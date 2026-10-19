@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import logging
 import sqlite3
 import hashlib
 import base64
@@ -19,6 +20,8 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from groq import Groq
 from gtts import gTTS
+
+logger = logging.getLogger(__name__)
 
 try:
     from pypdf import PdfReader
@@ -263,8 +266,7 @@ def verify_password(password: str, stored: str) -> bool:
             expected = base64.urlsafe_b64decode(digest_b64 + "=" * (-len(digest_b64) % 4))
             actual = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, int(rounds))
             return secrets.compare_digest(actual, expected)
-        legacy = hashlib.sha256((password + "lemon_permanent_salt_2026").encode("utf-8")).hexdigest()
-        return secrets.compare_digest(legacy, stored)
+        return False
     except Exception:
         return False
 
@@ -331,8 +333,9 @@ def ask_groq_resilient(user_prompt: str, mode: str, history: list, image_base64:
                 temperature=0.2
             )
             return chat.choices[0].message.content.strip(), "Illuminating"
-        except Exception as e:
-            return f"Vision processing error: {e}", "Formidable"
+        except Exception:
+            logger.exception("Vision processing failed")
+            return "Vision processing is temporarily unavailable.", "Formidable"
 
     clean_prompt = user_prompt.strip() if user_prompt and user_prompt.strip() else "Hello."
     messages = [{"role": "system", "content": instruction}]
@@ -342,7 +345,6 @@ def ask_groq_resilient(user_prompt: str, mode: str, history: list, image_base64:
     messages.append({"role": "user", "content": clean_prompt})
 
     models_to_try = ["llama-3.3-70b-versatile", "llama3-8b-8192"]
-    last_err = ""
     for model_name in models_to_try:
         try:
             chat = client.chat.completions.create(
@@ -355,11 +357,11 @@ def ask_groq_resilient(user_prompt: str, mode: str, history: list, image_base64:
                 reply = chat.choices[0].message.content.strip()
                 emotion = "Compassionate" if mode == "emotion" else "Insightful"
                 return reply, emotion
-        except Exception as exc:
-            last_err = str(exc)
+        except Exception:
+            logger.exception("Chat completion failed for model %s", model_name)
             continue
 
-    return f"Cognitive core offline. Error detail: {last_err}", "Formidable"
+    return "Cognitive core offline. Please try again later.", "Formidable"
 
 def execute_autonomous_complaint(complaint_id: int, category: str, message: str):
     diagnosis = "Triage completed."
@@ -435,8 +437,9 @@ def submit_complaint(
             "status": "ok",
             "message": "⚡ Ticket dispatched. Sentinel is diagnosing and treating your issue in real-time."
         })
-    except Exception as e:
-        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+    except Exception:
+        logger.exception("Complaint submission failed")
+        return JSONResponse({"status": "error", "message": "Unable to submit complaint."}, status_code=500)
     finally:
         conn.close()
 
@@ -506,7 +509,8 @@ def register_user(username: str = Form(...), password: str = Form(...), avatar: 
     except Exception as e:
         if "unique" in str(e).lower():
             return JSONResponse({"status": "error", "message": "Username already taken."}, status_code=400)
-        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+        logger.exception("User registration failed")
+        return JSONResponse({"status": "error", "message": "Unable to register user."}, status_code=500)
     finally:
         conn.close()
 
@@ -551,8 +555,9 @@ def get_user_sessions(user_id: int):
         cur.execute(sql, (user_id,))
         rows = cur.fetchall()
         return JSONResponse({"status": "ok", "sessions": [{"id": r[0], "title": r[1], "core_mode": r[2], "created_at": str(r[3])} for r in rows]})
-    except Exception as e:
-        return JSONResponse({"status": "error", "sessions": [], "message": str(e)})
+    except Exception:
+        logger.exception("Loading user sessions failed")
+        return JSONResponse({"status": "error", "sessions": [], "message": "Unable to load sessions."})
     finally:
         conn.close()
 
@@ -565,8 +570,9 @@ def get_session_messages(session_id: int):
         cur.execute(sql, (session_id,))
         rows = cur.fetchall()
         return JSONResponse({"status": "ok", "messages": [{"role": r[0], "content": r[1], "mode": r[2], "emotion": r[3], "image_data": r[4], "timestamp": str(r[5])} for r in rows]})
-    except Exception as e:
-        return JSONResponse({"status": "error", "messages": [], "message": str(e)})
+    except Exception:
+        logger.exception("Loading session messages failed")
+        return JSONResponse({"status": "error", "messages": [], "message": "Unable to load messages."})
     finally:
         conn.close()
 
@@ -586,8 +592,9 @@ def new_core_session(user_id: int = Form(...), core_mode: str = Form(...)):
             session_id = cur.lastrowid
         conn.commit()
         return JSONResponse({"status": "ok", "session_id": session_id, "title": title, "core_mode": core_mode})
-    except Exception as e:
-        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+    except Exception:
+        logger.exception("Creating core session failed")
+        return JSONResponse({"status": "error", "message": "Unable to create session."}, status_code=500)
     finally:
         conn.close()
 
@@ -600,8 +607,9 @@ def delete_session(session_id: int = Form(...)):
         cur.execute("DELETE FROM sessions WHERE id = %s" if engine == "postgres" else "DELETE FROM sessions WHERE id = ?", (session_id,))
         conn.commit()
         return JSONResponse({"status": "ok", "session_id": session_id})
-    except Exception as e:
-        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+    except Exception:
+        logger.exception("Deleting session failed")
+        return JSONResponse({"status": "error", "message": "Unable to delete session."}, status_code=500)
     finally:
         conn.close()
 
@@ -822,11 +830,12 @@ async def text_process(
             "audio_base64": audio_base64,
             "username": username
         })
-    except Exception as exc:
+    except Exception:
+        logger.exception("Text processing failed")
         return JSONResponse({
             "status": "ok",
             "user_text": text,
-            "reply_text": f"Cognitive core notice: {exc}",
+            "reply_text": "Cognitive core is temporarily unavailable. Please try again.",
             "emotion": "Formidable",
             "session_id": int(session_id) if str(session_id).isdigit() else 0,
             "title": "Discussion",
@@ -877,8 +886,9 @@ async def voice_process(
             os.remove(temp_path)
         except Exception:
             pass
-    except Exception as exc:
-        return JSONResponse({"status": "error", "message": f"Transcription error: {exc}"}, status_code=502)
+    except Exception:
+        logger.exception("Audio transcription failed")
+        return JSONResponse({"status": "error", "message": "Audio transcription failed. Please try again."}, status_code=502)
     
     if not user_text:
         return JSONResponse({"status": "error", "message": "No discernible speech detected."}, status_code=422)
